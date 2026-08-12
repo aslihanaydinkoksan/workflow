@@ -1,0 +1,69 @@
+<?php
+
+namespace App\Http\Middleware;
+
+use App\Models\UserNotification;
+use App\Services\TaskVisibility;
+use Illuminate\Http\Request;
+use Inertia\Middleware;
+
+class HandleInertiaRequests extends Middleware
+{
+    /**
+     * The root template that is loaded on the first page visit.
+     *
+     * @var string
+     */
+    protected $rootView = 'app';
+
+    /**
+     * Determine the current asset version.
+     */
+    public function version(Request $request): ?string
+    {
+        return parent::version($request);
+    }
+
+    /**
+     * Define the props that are shared by default.
+     *
+     * @return array<string, mixed>
+     */
+    public function share(Request $request): array
+    {
+        return [
+            ...parent::share($request),
+            'auth' => [
+                'user' => $request->user()?->load(['department', 'roles']),
+                'permissions' => $request->user()
+                    ? $request->user()->getAllPermissions()->pluck('name')->values()->all()
+                    : [],
+            ],
+            'centralSsoUrl' => rtrim(env('CENTRAL_SSO_URL', 'http://localhost:8001'), '/'),
+            'app_logo' => \App\Models\Setting::where('key', 'app_logo')->value('value'),
+            'flash' => [
+                'success' => fn () => $request->session()->get('success'),
+                'error' => fn () => $request->session()->get('error'),
+                'warning' => fn () => $request->session()->get('warning'),
+                'info' => fn () => $request->session()->get('info'),
+                'pending_tasks_notice' => fn () => $request->session()->get('pending_tasks_notice'),
+            ],
+            'pending_tasks_count' => fn () => $request->user()
+                ? TaskVisibility::queryForUser($request->user())->where('status', 'pending')->count()
+                : 0,
+            'unread_notifications_count' => fn () => $request->user()
+                ? UserNotification::query()
+                    ->where('user_id', $request->user()->id)
+                    ->whereNull('read_at')
+                    ->count()
+                : 0,
+            'recent_notifications' => fn () => $request->user()
+                ? UserNotification::query()
+                    ->where('user_id', $request->user()->id)
+                    ->latest()
+                    ->limit(8)
+                    ->get(['id', 'type', 'title', 'body', 'data', 'read_at', 'created_at'])
+                : [],
+        ];
+    }
+}
