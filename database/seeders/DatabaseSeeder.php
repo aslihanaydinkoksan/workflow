@@ -15,39 +15,28 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        // Reset cached roles and permissions
+        // Spatie önbelleğini tamamen temizle
         app()[PermissionRegistrar::class]->forgetCachedPermissions();
 
-        // Temizlik
-        \Illuminate\Support\Facades\Schema::disableForeignKeyConstraints();
-        User::truncate();
-        Department::truncate();
-        Directorate::truncate();
-        Role::truncate();
-        Permission::truncate();
-        DB::table('model_has_permissions')->truncate();
-        DB::table('model_has_roles')->truncate();
-        DB::table('role_has_permissions')->truncate();
-        \Illuminate\Support\Facades\Schema::enableForeignKeyConstraints();
+        /* 
+         * DİKKAT: Canlı ortamda veri kaybı (kendi hesabının silinmesi vb.) yaşanmaması için 
+         * truncate() fonksiyonları kaldırılmıştır. 
+         * findOrCreate ve firstOrCreate kullanılarak sadece eksik veriler eklenecektir. 
+         */
 
-        // İzinleri (Permissions) Oluştur
+        // İzinleri (Permissions) Oluştur - Spatie'nin en güvenli metodu ile
         $permissions = [
-            // Sistem ve Yönetim
             'view_admin_panel',
             'manage_users',
             'manage_roles',
             'manage_departments',
             'manage_directorates',
             'manage_settings',
-
-            // Şablon ve Akış Tasarımı
             'manage_workflows',
             'create_forms',
             'templates.edit',
             'templates.delete',
             'templates.publish',
-
-            // Süreç ve Görev Yönetimi
             'start_processes',
             'processes.approve',
             'processes.assign',
@@ -59,18 +48,18 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($permissions as $permission) {
-            Permission::firstOrCreate(['name' => $permission, 'guard_name' => 'web']);
+            Permission::findOrCreate($permission, 'web');
         }
 
-        // Rolleri Oluştur ve İzinleri Ata
+        // Rolleri Oluştur ve İzinleri Ata - syncPermissions kullanarak tekrarları önlüyoruz
 
         // 1. Admin
-        $roleAdmin = Role::firstOrCreate(['name' => 'Admin']);
-        $roleAdmin->givePermissionTo(Permission::all()); // Bütün yetkileri alır
+        $roleAdmin = Role::findOrCreate('Admin', 'web');
+        $roleAdmin->syncPermissions(Permission::all());
 
         // 2. Süreç Tasarımcısı
-        $roleTasarimci = Role::firstOrCreate(['name' => 'Süreç Tasarımcısı']);
-        $roleTasarimci->givePermissionTo([
+        $roleTasarimci = Role::findOrCreate('Süreç Tasarımcısı', 'web');
+        $roleTasarimci->syncPermissions([
             'view_admin_panel',
             'manage_workflows',
             'create_forms',
@@ -82,8 +71,8 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // 3. Direktör
-        $roleDirektor = Role::firstOrCreate(['name' => 'Direktör']);
-        $roleDirektor->givePermissionTo([
+        $roleDirektor = Role::findOrCreate('Direktör', 'web');
+        $roleDirektor->syncPermissions([
             'start_processes',
             'processes.approve',
             'processes.assign',
@@ -94,8 +83,8 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // 4. Müdür
-        $roleMudur = Role::firstOrCreate(['name' => 'Müdür']);
-        $roleMudur->givePermissionTo([
+        $roleMudur = Role::findOrCreate('Müdür', 'web');
+        $roleMudur->syncPermissions([
             'start_processes',
             'processes.approve',
             'processes.assign',
@@ -105,8 +94,8 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // 5. Müdür Yardımcısı / Amir
-        $roleAmir = Role::firstOrCreate(['name' => 'Amir']);
-        $roleAmir->givePermissionTo([
+        $roleAmir = Role::findOrCreate('Amir', 'web');
+        $roleAmir->syncPermissions([
             'start_processes',
             'processes.approve',
             'processes.assign',
@@ -115,97 +104,79 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // 6. Kullanıcı (Standart Personel)
-        $roleKullanici = Role::firstOrCreate(['name' => 'Kullanıcı']);
-        $roleKullanici->givePermissionTo([
+        $roleKullanici = Role::findOrCreate('Kullanıcı', 'web');
+        $roleKullanici->syncPermissions([
             'start_processes',
             'processes.approve',
             'processes.view_own'
         ]);
 
         // 7. Müşteri
-        $roleMusteri = Role::firstOrCreate(['name' => 'Müşteri']);
-        $roleMusteri->givePermissionTo([
+        $roleMusteri = Role::findOrCreate('Müşteri', 'web');
+        $roleMusteri->syncPermissions([
             'start_processes',
             'processes.approve',
             'processes.view_own'
         ]);
 
         // 8. Mavi Yaka
-        $roleMaviYaka = Role::firstOrCreate(['name' => 'Mavi Yaka']);
-        $roleMaviYaka->givePermissionTo([
+        $roleMaviYaka = Role::findOrCreate('Mavi Yaka', 'web');
+        $roleMaviYaka->syncPermissions([
             'start_processes',
             'processes.approve',
             'processes.view_own'
         ]);
 
-        // Örnek Hiyerarşi Oluşturma
-        $dirUretim = Directorate::create(['name' => 'Üretim Direktörlüğü']);
 
-        $deptYonetim = Department::create(['name' => 'Yönetim', 'directorate_id' => $dirUretim->id]);
-        $deptIK = Department::create(['name' => 'İnsan Kaynakları', 'parent_id' => $deptYonetim->id, 'directorate_id' => $dirUretim->id]);
-        $deptBT = Department::create(['name' => 'Bilgi Teknolojileri', 'parent_id' => $deptYonetim->id, 'directorate_id' => $dirUretim->id]);
+        // Örnek Hiyerarşi Oluşturma - Var olanı ezmemek için firstOrCreate
+        $dirUretim = Directorate::firstOrCreate(['name' => 'Üretim Direktörlüğü']);
 
-        // Kullanıcıları Oluştur
+        $deptYonetim = Department::firstOrCreate(['name' => 'Yönetim'], ['directorate_id' => $dirUretim->id]);
+        $deptIK = Department::firstOrCreate(['name' => 'İnsan Kaynakları'], ['parent_id' => $deptYonetim->id, 'directorate_id' => $dirUretim->id]);
+        $deptBT = Department::firstOrCreate(['name' => 'Bilgi Teknolojileri'], ['parent_id' => $deptYonetim->id, 'directorate_id' => $dirUretim->id]);
+
+
+        // Test Kullanıcılarını Oluştur - Gerçek hesaplarla çakışmaması için firstOrCreate
         $password = bcrypt('password');
 
-        $admin = User::create([
-            'name' => 'Sistem Yöneticisi',
-            'email' => 'admin@test.com',
-            'password' => $password,
-            'title' => 'Admin',
-            'department_id' => $deptBT->id,
-        ]);
+        $admin = User::firstOrCreate(
+            ['email' => 'admin@test.com'],
+            ['name' => 'Sistem Yöneticisi', 'password' => $password, 'title' => 'Admin', 'department_id' => $deptBT->id]
+        );
         $admin->assignRole('Admin');
 
-        $tasarimci = User::create([
-            'name' => 'Süreç Tasarımcısı',
-            'email' => 'tasarimci@test.com',
-            'password' => $password,
-            'title' => 'İş Analisti',
-            'department_id' => $deptBT->id,
-        ]);
+        $tasarimci = User::firstOrCreate(
+            ['email' => 'tasarimci@test.com'],
+            ['name' => 'Süreç Tasarımcısı', 'password' => $password, 'title' => 'İş Analisti', 'department_id' => $deptBT->id]
+        );
         $tasarimci->assignRole('Süreç Tasarımcısı');
 
-        $direktor = User::create([
-            'name' => 'Şirket Direktörü',
-            'email' => 'direktor@test.com',
-            'password' => $password,
-            'title' => 'İnsan Kaynakları Direktörü',
-            'department_id' => $deptIK->id,
-            'directorate_id' => $dirUretim->id,
-        ]);
+        $direktor = User::firstOrCreate(
+            ['email' => 'direktor@test.com'],
+            ['name' => 'Şirket Direktörü', 'password' => $password, 'title' => 'İnsan Kaynakları Direktörü', 'department_id' => $deptIK->id, 'directorate_id' => $dirUretim->id]
+        );
         $dirUretim->update(['director_id' => $direktor->id]);
         $direktor->assignRole('Direktör');
 
-        $mudur = User::create([
-            'name' => 'Departman Müdürü',
-            'email' => 'mudur@test.com',
-            'password' => $password,
-            'title' => 'İşe Alım Müdürü',
-            'department_id' => $deptIK->id,
-            'manager_id' => $direktor->id,
-        ]);
+        $mudur = User::firstOrCreate(
+            ['email' => 'mudur@test.com'],
+            ['name' => 'Departman Müdürü', 'password' => $password, 'title' => 'İşe Alım Müdürü', 'department_id' => $deptIK->id, 'manager_id' => $direktor->id]
+        );
         $mudur->assignRole('Müdür');
 
-        $amir = User::create([
-            'name' => 'Birim Amiri',
-            'email' => 'amir@test.com',
-            'password' => $password,
-            'title' => 'Takım Lideri',
-            'department_id' => $deptIK->id,
-            'manager_id' => $mudur->id,
-        ]);
+        $amir = User::firstOrCreate(
+            ['email' => 'amir@test.com'],
+            ['name' => 'Birim Amiri', 'password' => $password, 'title' => 'Takım Lideri', 'department_id' => $deptIK->id, 'manager_id' => $mudur->id]
+        );
         $amir->assignRole('Amir');
 
-        $kullanici = User::create([
-            'name' => 'Düz Kullanıcı',
-            'email' => 'kullanici@test.com',
-            'password' => $password,
-            'title' => 'Personel',
-            'department_id' => $deptIK->id,
-            'manager_id' => $amir->id,
-        ]);
+        $kullanici = User::firstOrCreate(
+            ['email' => 'kullanici@test.com'],
+            ['name' => 'Düz Kullanıcı', 'password' => $password, 'title' => 'Personel', 'department_id' => $deptIK->id, 'manager_id' => $amir->id]
+        );
         $kullanici->assignRole('Kullanıcı');
+
+        // Hiyerarşi Seeder'ını çağır
         $this->call([
             HierarchySeeder::class,
         ]);
