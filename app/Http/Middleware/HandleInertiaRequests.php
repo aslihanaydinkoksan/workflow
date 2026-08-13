@@ -31,12 +31,18 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
+        $user = $request->user();
+
+        if ($user) {
+            $user->load(['department', 'roles']);
+        }
+
         return [
             ...parent::share($request),
             'auth' => [
-                'user' => $request->user()?->load(['department', 'roles']),
-                'permissions' => $request->user()
-                    ? $request->user()->getAllPermissions()->pluck('name')->values()->all()
+                'user' => $user,
+                'permissions' => $user 
+                    ? $user->getAllPermissions()->pluck('name')->values()->all() 
                     : [],
             ],
             'centralSsoUrl' => rtrim(env('CENTRAL_SSO_URL', 'http://localhost:8001'), '/'),
@@ -48,18 +54,18 @@ class HandleInertiaRequests extends Middleware
                 'info' => fn () => $request->session()->get('info'),
                 'pending_tasks_notice' => fn () => $request->session()->get('pending_tasks_notice'),
             ],
-            'pending_tasks_count' => fn () => $request->user()
-                ? TaskVisibility::queryForUser($request->user())->where('status', 'pending')->count()
+            'pending_tasks_count' => fn () => $user
+                ? TaskVisibility::queryForUser($user)->where('status', 'pending')->count()
                 : 0,
-            'unread_notifications_count' => fn () => $request->user()
+            'unread_notifications_count' => fn () => $user
                 ? UserNotification::query()
-                    ->where('user_id', $request->user()->id)
+                    ->where('user_id', $user->id)
                     ->whereNull('read_at')
                     ->count()
                 : 0,
-            'recent_notifications' => fn () => $request->user()
+            'recent_notifications' => fn () => $user
                 ? UserNotification::query()
-                    ->where('user_id', $request->user()->id)
+                    ->where('user_id', $user->id)
                     ->latest()
                     ->limit(8)
                     ->get(['id', 'type', 'title', 'body', 'data', 'read_at', 'created_at'])

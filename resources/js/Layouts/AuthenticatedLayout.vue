@@ -12,10 +12,10 @@ const showPendingTasksToast = ref(false);
 let pendingTasksToastTimer = null;
 
 const page = usePage();
-const user = computed(() => page.props.auth.user);
-const permissions = computed(() => page.props.auth.permissions || []);
+const user = computed(() => page.props.auth?.user);
+const permissions = computed(() => page.props.auth?.permissions || []);
 const ssoUrl = computed(() => page.props.centralSsoUrl);
-const pendingTasksNotice = computed(() => page.props.flash.pending_tasks_notice);
+const pendingTasksNotice = computed(() => page.props.flash?.pending_tasks_notice);
 
 const hasPermission = (perm) => permissions.value.includes(perm);
 const pendingTasksCount = computed(() => page.props.pending_tasks_count ?? 0);
@@ -109,9 +109,9 @@ onBeforeUnmount(() => {
 <template>
     <div>
         <!-- Flash Messages Toast -->
-        <div v-if="$page.props.flash.success || $page.props.flash.error || $page.props.flash.warning || $page.props.flash.info" class="fixed top-4 right-4 z-50 flex flex-col gap-2">
+        <div v-if="$page.props.flash?.success || $page.props.flash?.error || $page.props.flash?.warning || $page.props.flash?.info" class="fixed top-4 right-4 z-50 flex flex-col gap-2">
             
-            <div v-if="$page.props.flash.success" class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded shadow-lg max-w-md animate-fade-in-down flex items-start" role="alert">
+            <div v-if="$page.props.flash?.success" class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded shadow-lg max-w-md animate-fade-in-down flex items-start" role="alert">
                 <svg class="w-5 h-5 mr-3 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
                 <div>
                     <p class="font-bold">Başarılı</p>
@@ -119,7 +119,7 @@ onBeforeUnmount(() => {
                 </div>
             </div>
 
-            <div v-if="$page.props.flash.error" class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded shadow-lg max-w-md animate-fade-in-down flex items-start" role="alert">
+            <div v-if="$page.props.flash?.error" class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded shadow-lg max-w-md animate-fade-in-down flex items-start" role="alert">
                 <svg class="w-5 h-5 mr-3 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 <div>
                     <p class="font-bold">Hata</p>
@@ -127,7 +127,7 @@ onBeforeUnmount(() => {
                 </div>
             </div>
 
-            <div v-if="$page.props.flash.warning" class="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-4 rounded shadow-lg max-w-md animate-fade-in-down flex items-start" role="alert">
+            <div v-if="$page.props.flash?.warning" class="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-4 rounded shadow-lg max-w-md animate-fade-in-down flex items-start" role="alert">
                 <svg class="w-5 h-5 mr-3 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                 <div>
                     <p class="font-bold">Uyarı</p>
@@ -135,7 +135,7 @@ onBeforeUnmount(() => {
                 </div>
             </div>
             
-            <div v-if="$page.props.flash.info" class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded shadow-lg max-w-md animate-fade-in-down flex items-start" role="alert">
+            <div v-if="$page.props.flash?.info" class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded shadow-lg max-w-md animate-fade-in-down flex items-start" role="alert">
                 <svg class="w-5 h-5 mr-3 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 <div>
                     <p class="font-bold">Bilgi</p>
@@ -305,7 +305,7 @@ onBeforeUnmount(() => {
                                 </Dropdown>
                             </div>
 
-                            <!-- Admin Panel Dropdown (SADECE YETKİLİLERE GÖRÜNÜR) -->
+                            <!-- Admin Panel Dropdown -->
                             <div class="relative" v-if="hasPermission('view_admin_panel')">
                                 <Dropdown align="right" width="56">
                                     <template #trigger>
@@ -335,23 +335,19 @@ onBeforeUnmount(() => {
                                         <DropdownLink v-if="hasPermission('create_forms')" :href="route('admin.form-categories.index')">Form Kategorileri</DropdownLink>
                                         <div class="border-t border-gray-100 my-1"></div>
                                         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Dinamik Organizasyon</div>
-                                        <DropdownLink v-if="hasPermission('view_admin_panel')" :href="route('admin.tree-types.index')">
-                                            Şema Tasarımcısı
-                                        </DropdownLink>
-                                        <DropdownLink v-if="hasPermission('view_admin_panel')" :href="route('admin.hierarchy.test')">
-                                            Organizasyon Şeması
-                                        </DropdownLink>
+                                        <DropdownLink v-if="hasPermission('view_admin_panel')" :href="route('admin.tree-types.index')">Şema Tasarımcısı</DropdownLink>
+                                        <DropdownLink v-if="hasPermission('view_admin_panel')" :href="route('admin.hierarchy.test')">Organizasyon Şeması</DropdownLink>
                                     </template>
                                 </Dropdown>
                             </div>
 
                             <!-- User Profile Dropdown -->
-                            <div class="relative ml-3 border-l border-gray-200 pl-4">
+                            <div class="relative ml-3 border-l border-gray-200 pl-4" v-if="user">
                                 <Dropdown align="right" width="48">
                                     <template #trigger>
                                         <button class="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none transition duration-150 ease-in-out group">
                                             <div class="w-9 h-9 rounded-full bg-gray-200 border-2 border-white shadow-sm flex items-center justify-center text-gray-600 font-bold mr-2 group-hover:border-indigo-100 transition-colors">
-                                                {{ user.name.substring(0, 2).toUpperCase() }}
+                                                {{ user.name ? user.name.substring(0, 2).toUpperCase() : 'US' }}
                                             </div>
                                             <div class="text-left hidden lg:block">
                                                 <div class="text-sm font-bold text-gray-800 leading-tight">{{ user.name }}</div>
@@ -424,7 +420,7 @@ onBeforeUnmount(() => {
                         <ResponsiveNavLink v-if="hasPermission('view_admin_panel')" :href="route('admin.hierarchy.test')">Organizasyon Şeması</ResponsiveNavLink>
                     </div>
 
-                    <div class="pt-4 pb-1 border-t border-gray-200">
+                    <div class="pt-4 pb-1 border-t border-gray-200" v-if="user">
                         <div class="px-4">
                             <div class="font-medium text-base text-gray-800">{{ user.name }}</div>
                             <div class="font-medium text-sm text-gray-500">{{ user.email }}</div>
