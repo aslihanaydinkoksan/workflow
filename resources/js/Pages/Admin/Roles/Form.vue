@@ -14,8 +14,9 @@ const form = useForm({
 });
 
 const submit = () => {
-    if (props.role) {
-        form.put(route('admin.roles.update', props.role.id));
+    if (props.role && props.role.id) {
+        // Parametreyi süslü parantez (obje) içinde gönder!
+        form.put(route('admin.roles.update', { role: props.role.id }));
     } else {
         form.post(route('admin.roles.store'));
     }

@@ -29,41 +29,34 @@ class HandleInertiaRequests extends Middleware
      *
      * @return array<string, mixed>
      */
-   public function share(Request $request): array
+    public function share(Request $request): array
     {
-        // CANLI TESTİ İÇİN GEÇİCİ LOGLAMA:
-    \Illuminate\Support\Facades\Log::info('Inertia User Check:', [
-        'default_user' => $request->user()?->id,
-        'auth_user' => \Illuminate\Support\Facades\Auth::user()?->id,
-        'all_session' => session()->all()
-    ]);
         $user = $request->user();
-        $userData = null;
 
-        if ($user) {
-            // Sadece Vue'ya obje olarak gitmesi gereken 'department' ilişkisini yüklüyoruz.
-            // Spatie ilişkilerini (roles, permissions) bilerek yüklemiyoruz çünkü 
-            // onlar obje dizisi olarak değil, sadece İSİMLERİ (string dizisi) olarak lazım!
-            $user->load(['department']); 
-            
-            // Tüm kullanıcı bilgilerini alıyoruz. (İçinde roller veya yetkiler obje olarak YOK)
-            $userData = $user->toArray();
-            
-            // Vue tarafındaki çökmeleri ve 405 hatalarını önlemek için, 
-            // Rolleri ve Yetkileri sadece düz metin (string array) olarak gönderiyoruz.
-            $userData['roles'] = $user->getRoleNames()->toArray();
-            $userData['permissions'] = $user->getAllPermissions()->pluck('name')->toArray();
-        }
+        // Rol ve Yetkileri düz metin (string array) olarak hazırlıyoruz.
+        // Array_values ile indexleri sıfırlayarak JSON'da obje gibi algılanmasını önlüyoruz.
+        $roles = $user ? array_values($user->getRoleNames()->toArray()) : [];
+        $permissions = $user ? array_values($user->getAllPermissions()->pluck('name')->toArray()) : [];
+
+        // Kullanıcı verisini güvenli hale getiriyoruz. (Spatie objelerinden arındırıyoruz)
+        $userData = $user ? [
+            'id' => $user->id,
+            'name' => $user->name ?? 'Kullanıcı',
+            'first_name' => $user->first_name ?? '',
+            'last_name' => $user->last_name ?? '',
+            'title' => $user->title ?? '',
+            'department_id' => $user->department_id,
+            'email' => $user->email,
+            'roles' => $roles, // String dizisi (örn: ["Admin"])
+            'permissions' => $permissions // String dizisi (örn: ["view_admin_panel"])
+        ] : null;
 
         return [
             ...parent::share($request),
             'auth' => [
-                'user' => $userData, 
-                // Bu aşağıdaki iki satırı aslında yukarıda $userData içine eklediğimiz 
-                // için artık tamamen gereksizler ama Vue kodların belki dışarıdan da (props.auth.roles olarak) 
-                // okuyordur diye güvenli bir yedek olarak bırakıyoruz.
-                'roles' => $user ? $user->getRoleNames()->toArray() : [],
-                'permissions' => $user ? $user->getAllPermissions()->pluck('name')->toArray() : [],
+                'user' => $userData,
+                'roles' => $roles,
+                'permissions' => $permissions,
             ],
             'centralSsoUrl' => rtrim(env('CENTRAL_SSO_URL', 'http://localhost:8001'), '/'),
             'app_logo' => \App\Models\Setting::where('key', 'app_logo')->value('value'),
