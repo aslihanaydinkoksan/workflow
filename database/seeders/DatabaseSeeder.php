@@ -59,17 +59,17 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($permissions as $permission) {
-            Permission::create(['name' => $permission]);
+            Permission::firstOrCreate(['name' => $permission, 'guard_name' => 'web']);
         }
 
         // Rolleri Oluştur ve İzinleri Ata
-        
+
         // 1. Admin
-        $roleAdmin = Role::create(['name' => 'Admin']);
+        $roleAdmin = Role::firstOrCreate(['name' => 'Admin']);
         $roleAdmin->givePermissionTo(Permission::all()); // Bütün yetkileri alır
 
         // 2. Süreç Tasarımcısı
-        $roleTasarimci = Role::create(['name' => 'Süreç Tasarımcısı']);
+        $roleTasarimci = Role::firstOrCreate(['name' => 'Süreç Tasarımcısı']);
         $roleTasarimci->givePermissionTo([
             'view_admin_panel',
             'manage_workflows',
@@ -82,7 +82,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // 3. Direktör
-        $roleDirektor = Role::create(['name' => 'Direktör']);
+        $roleDirektor = Role::firstOrCreate(['name' => 'Direktör']);
         $roleDirektor->givePermissionTo([
             'start_processes',
             'processes.approve',
@@ -94,7 +94,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // 4. Müdür
-        $roleMudur = Role::create(['name' => 'Müdür']);
+        $roleMudur = Role::firstOrCreate(['name' => 'Müdür']);
         $roleMudur->givePermissionTo([
             'start_processes',
             'processes.approve',
@@ -105,7 +105,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // 5. Müdür Yardımcısı / Amir
-        $roleAmir = Role::create(['name' => 'Amir']);
+        $roleAmir = Role::firstOrCreate(['name' => 'Amir']);
         $roleAmir->givePermissionTo([
             'start_processes',
             'processes.approve',
@@ -115,7 +115,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // 6. Kullanıcı (Standart Personel)
-        $roleKullanici = Role::create(['name' => 'Kullanıcı']);
+        $roleKullanici = Role::firstOrCreate(['name' => 'Kullanıcı']);
         $roleKullanici->givePermissionTo([
             'start_processes',
             'processes.approve',
@@ -123,7 +123,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // 7. Müşteri
-        $roleMusteri = Role::create(['name' => 'Müşteri']);
+        $roleMusteri = Role::firstOrCreate(['name' => 'Müşteri']);
         $roleMusteri->givePermissionTo([
             'start_processes',
             'processes.approve',
@@ -131,7 +131,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // 8. Mavi Yaka
-        $roleMaviYaka = Role::create(['name' => 'Mavi Yaka']);
+        $roleMaviYaka = Role::firstOrCreate(['name' => 'Mavi Yaka']);
         $roleMaviYaka->givePermissionTo([
             'start_processes',
             'processes.approve',
