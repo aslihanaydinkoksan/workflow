@@ -40,35 +40,34 @@ class HandleInertiaRequests extends Middleware
         return [
             ...parent::share($request),
             'auth' => [
-                'user' => $user,
-                'permissions' => $user 
-                    ? $user->getAllPermissions()->pluck('name')->values()->all() 
-                    : [],
+                'user' => $request->user(),
+                'roles' => $request->user() ? $request->user()->getRoleNames() : [],
+                'permissions' => $request->user() ? $request->user()->getAllPermissions()->pluck('name') : [],
             ],
             'centralSsoUrl' => rtrim(env('CENTRAL_SSO_URL', 'http://localhost:8001'), '/'),
             'app_logo' => \App\Models\Setting::where('key', 'app_logo')->value('value'),
             'flash' => [
-                'success' => fn () => $request->session()->get('success'),
-                'error' => fn () => $request->session()->get('error'),
-                'warning' => fn () => $request->session()->get('warning'),
-                'info' => fn () => $request->session()->get('info'),
-                'pending_tasks_notice' => fn () => $request->session()->get('pending_tasks_notice'),
+                'success' => fn() => $request->session()->get('success'),
+                'error' => fn() => $request->session()->get('error'),
+                'warning' => fn() => $request->session()->get('warning'),
+                'info' => fn() => $request->session()->get('info'),
+                'pending_tasks_notice' => fn() => $request->session()->get('pending_tasks_notice'),
             ],
-            'pending_tasks_count' => fn () => $user
+            'pending_tasks_count' => fn() => $user
                 ? TaskVisibility::queryForUser($user)->where('status', 'pending')->count()
                 : 0,
-            'unread_notifications_count' => fn () => $user
+            'unread_notifications_count' => fn() => $user
                 ? UserNotification::query()
-                    ->where('user_id', $user->id)
-                    ->whereNull('read_at')
-                    ->count()
+                ->where('user_id', $user->id)
+                ->whereNull('read_at')
+                ->count()
                 : 0,
-            'recent_notifications' => fn () => $user
+            'recent_notifications' => fn() => $user
                 ? UserNotification::query()
-                    ->where('user_id', $user->id)
-                    ->latest()
-                    ->limit(8)
-                    ->get(['id', 'type', 'title', 'body', 'data', 'read_at', 'created_at'])
+                ->where('user_id', $user->id)
+                ->latest()
+                ->limit(8)
+                ->get(['id', 'type', 'title', 'body', 'data', 'read_at', 'created_at'])
                 : [],
         ];
     }
