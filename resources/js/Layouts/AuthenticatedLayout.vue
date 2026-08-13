@@ -12,12 +12,21 @@ const showPendingTasksToast = ref(false);
 let pendingTasksToastTimer = null;
 
 const page = usePage();
-const user = computed(() => page.props.auth?.user);
+const user = computed(() => page.props.auth?.user || page.props.user);
 const permissions = computed(() => page.props.auth?.permissions || []);
+const userRoles = computed(() => {
+    const roles = user.value?.roles || [];
+    return roles.map(r => typeof r === 'string' ? r : r.name);
+});
 const ssoUrl = computed(() => page.props.centralSsoUrl);
 const pendingTasksNotice = computed(() => page.props.flash?.pending_tasks_notice);
 
-const hasPermission = (perm) => permissions.value.includes(perm);
+const hasPermission = (perm) => {
+    if (userRoles.value.includes('Admin')) return true;
+    
+    const perms = page.props.auth?.permissions || page.props.user?.permissions || [];
+    return perms.includes(perm);
+};
 const pendingTasksCount = computed(() => page.props.pending_tasks_count ?? 0);
 const hasPendingTasks = computed(() => pendingTasksCount.value > 0);
 const unreadNotificationsCount = computed(() => page.props.unread_notifications_count ?? 0);
@@ -118,20 +127,10 @@ const displayUserName = computed(() => {
     return user.value.name || 'Kullanıcı';
 });
 
-// Ünvan (Title) veya Rol (Rol ilişkisi yoksa çökmeyi engeller)
 const displayRoleOrTitle = computed(() => {
     if (!user.value) return 'Personel';
-
-    // Öncelik veritabanınızdaki 'title' kolonu
-    if (user.value.title) {
-        return user.value.title;
-    }
-
-    // Title yoksa Spatie roles üzerinden güvenli okuma yap
-    if (user.value.roles && user.value.roles.length > 0) {
-        return user.value.roles[0].name;
-    }
-
+    if (user.value.title) return user.value.title;
+    if (userRoles.value.length > 0) return userRoles.value[0];
     return 'Personel';
 });
 watch(
