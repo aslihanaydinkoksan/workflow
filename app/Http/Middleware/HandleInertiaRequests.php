@@ -31,6 +31,12 @@ class HandleInertiaRequests extends Middleware
      */
    public function share(Request $request): array
     {
+        // CANLI TESTİ İÇİN GEÇİCİ LOGLAMA:
+    \Illuminate\Support\Facades\Log::info('Inertia User Check:', [
+        'default_user' => $request->user()?->id,
+        'auth_user' => \Illuminate\Support\Facades\Auth::user()?->id,
+        'all_session' => session()->all()
+    ]);
         $user = $request->user();
         $userData = null;
 
