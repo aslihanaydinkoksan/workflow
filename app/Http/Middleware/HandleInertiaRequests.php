@@ -29,30 +29,35 @@ class HandleInertiaRequests extends Middleware
      *
      * @return array<string, mixed>
      */
-    public function share(Request $request): array
+   public function share(Request $request): array
     {
         $user = $request->user();
         $userData = null;
 
         if ($user) {
-            // Sadece departmanı yüklüyoruz. 'roles' ilişkisini yüklemekten vazgeçtik 
-            // çünkü Vue'ya obje dizisi gitmesini istemiyoruz.
+            // Sadece Vue'ya obje olarak gitmesi gereken 'department' ilişkisini yüklüyoruz.
+            // Spatie ilişkilerini (roles, permissions) bilerek yüklemiyoruz çünkü 
+            // onlar obje dizisi olarak değil, sadece İSİMLERİ (string dizisi) olarak lazım!
             $user->load(['department']); 
             
-            // Tüm kullanıcı verilerini (title, first_name vb. dahil) alıyoruz.
+            // Tüm kullanıcı bilgilerini alıyoruz. (İçinde roller veya yetkiler obje olarak YOK)
             $userData = $user->toArray();
             
-            // VUE'NUN ÇÖKMESİNİ ENGELLEYEN SİHİRLİ DOKUNUŞ:
-            // Rolleri obje dizisi olarak değil, doğrudan ["Admin"] gibi düz metin dizisi olarak eziyoruz.
-            $userData['roles'] = $user->getRoleNames();
+            // Vue tarafındaki çökmeleri ve 405 hatalarını önlemek için, 
+            // Rolleri ve Yetkileri sadece düz metin (string array) olarak gönderiyoruz.
+            $userData['roles'] = $user->getRoleNames()->toArray();
+            $userData['permissions'] = $user->getAllPermissions()->pluck('name')->toArray();
         }
 
         return [
             ...parent::share($request),
             'auth' => [
                 'user' => $userData, 
-                'roles' => $user ? $user->getRoleNames() : [],
-                'permissions' => $user ? $user->getAllPermissions()->pluck('name') : [],
+                // Bu aşağıdaki iki satırı aslında yukarıda $userData içine eklediğimiz 
+                // için artık tamamen gereksizler ama Vue kodların belki dışarıdan da (props.auth.roles olarak) 
+                // okuyordur diye güvenli bir yedek olarak bırakıyoruz.
+                'roles' => $user ? $user->getRoleNames()->toArray() : [],
+                'permissions' => $user ? $user->getAllPermissions()->pluck('name')->toArray() : [],
             ],
             'centralSsoUrl' => rtrim(env('CENTRAL_SSO_URL', 'http://localhost:8001'), '/'),
             'app_logo' => \App\Models\Setting::where('key', 'app_logo')->value('value'),
