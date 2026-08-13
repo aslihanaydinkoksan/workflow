@@ -32,15 +32,25 @@ class HandleInertiaRequests extends Middleware
     public function share(Request $request): array
     {
         $user = $request->user();
+        $userData = null;
 
         if ($user) {
-            $user->load(['department', 'roles']);
+            // Sadece departmanı yüklüyoruz. 'roles' ilişkisini yüklemekten vazgeçtik 
+            // çünkü Vue'ya obje dizisi gitmesini istemiyoruz.
+            $user->load(['department']); 
+            
+            // Tüm kullanıcı verilerini (title, first_name vb. dahil) alıyoruz.
+            $userData = $user->toArray();
+            
+            // VUE'NUN ÇÖKMESİNİ ENGELLEYEN SİHİRLİ DOKUNUŞ:
+            // Rolleri obje dizisi olarak değil, doğrudan ["Admin"] gibi düz metin dizisi olarak eziyoruz.
+            $userData['roles'] = $user->getRoleNames();
         }
 
         return [
             ...parent::share($request),
             'auth' => [
-                'user' => $user, // Tüm tablo verileriniz (title, first_name vb.) korunarak gider
+                'user' => $userData, 
                 'roles' => $user ? $user->getRoleNames() : [],
                 'permissions' => $user ? $user->getAllPermissions()->pluck('name') : [],
             ],
