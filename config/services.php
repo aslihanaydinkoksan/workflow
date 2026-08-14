@@ -34,5 +34,10 @@ return [
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
     ],
+    'mys' => [
+        'url' => env('CENTRAL_SSO_URL', 'http://localhost:8001'),
+        'api_key' => env('CENTRAL_SSO_API_KEY', 'koksan123'),
+        'timeout' => 5, // MYS kapalıysa sistemi kitlememesi için 5 saniyelik limit
+    ],
 
 ];
