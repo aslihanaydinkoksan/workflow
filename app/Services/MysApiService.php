@@ -83,4 +83,47 @@ class MysApiService
             throw new Exception('KÖKSAN Merkezi Yönetim Sistemi (MYS) şu anda ulaşılamaz durumda.');
         }
     }
+    /**
+     * MYS'den tüm direktörlükleri çeker.
+     *
+     * @return array
+     * @throws Exception
+     */
+    public function fetchAllDirectorates(): array
+    {
+        try {
+            $response = $this->client()->get("{$this->baseUrl}/api/internal/directorates");
+
+            if ($response->successful() && $response->json('success')) {
+                return $response->json('directorates') ?? [];
+            }
+
+            throw new Exception("MYS API'den başarısız yanıt döndü veya 'success' false.");
+        } catch (Exception $e) {
+            Log::error('MysApiService - fetchAllDirectorates Hatası: ' . $e->getMessage());
+            throw new Exception('Merkezi Yönetim Sistemi (MYS) şu anda ulaşılamaz durumda.');
+        }
+    }
+
+    /**
+     * MYS'den tüm departmanları çeker.
+     *
+     * @return array
+     * @throws Exception
+     */
+    public function fetchAllDepartments(): array
+    {
+        try {
+            $response = $this->client()->get("{$this->baseUrl}/api/internal/departments");
+
+            if ($response->successful() && $response->json('success')) {
+                return $response->json('departments') ?? [];
+            }
+
+            throw new Exception("MYS API'den başarısız yanıt döndü veya 'success' false.");
+        } catch (Exception $e) {
+            Log::error('MysApiService - fetchAllDepartments Hatası: ' . $e->getMessage());
+            throw new Exception('Merkezi Yönetim Sistemi (MYS) şu anda ulaşılamaz durumda.');
+        }
+    }
 }
