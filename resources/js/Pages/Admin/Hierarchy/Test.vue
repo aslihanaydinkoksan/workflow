@@ -29,7 +29,7 @@ const handleDrop = async (e, newParentId) => {
     if (!confirm("Düğümü buraya taşımak istiyor musunuz?")) return;
 
     try {
-        await axios.patch(`/admin/hierarchy/nodes/${draggedNodeId.value}/move`, { new_parent_id: newParentId });
+        await axios.patch(route('admin.hierarchy.nodes.move', draggedNodeId.value), { new_parent_id: newParentId });
         router.reload({ only: ['nodes'] });
     } catch (err) {
         alert("Taşıma başarısız oldu.");
@@ -159,7 +159,9 @@ const openModal = (action, parentId = null, nodeToEdit = null) => {
 const submitModal = async () => {
     isProcessing.value = true;
     try {
-        const url = modalAction.value === 'create' ? '/admin/hierarchy/nodes' : `/admin/hierarchy/nodes/${activeNodeId.value}`;
+        const url = modalAction.value === 'create' 
+            ? route('admin.hierarchy.nodes.store') 
+            : route('admin.hierarchy.nodes.update', activeNodeId.value);
         const method = modalAction.value === 'create' ? 'post' : 'put';
         
         await axios[method](url, form.value);
@@ -176,7 +178,7 @@ const submitModal = async () => {
 const deleteNode = async (id) => {
     if (!confirm("Bu düğümü ve tüm alt düğümlerini silmek istediğinize emin misiniz?")) return;
     try {
-        await axios.delete(`/admin/hierarchy/nodes/${id}`);
+        await axios.delete(route('admin.hierarchy.nodes.destroy', id));
         router.reload({ only: ['nodes'] });
     } catch (err) {
         alert("Silme başarısız.");
