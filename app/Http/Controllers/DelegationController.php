@@ -15,28 +15,25 @@ use App\Services\NotificationService;
 class DelegationController extends Controller
 {
     public function store(Request $request, NotificationService $notificationService)
-{
-    $validated = $request->validate([
-        'delegatee_id' => 'required|exists:users,id',
-        'start_date'   => 'required|date|after_or_equal:today',
-        'end_date'     => 'required|date|after_or_equal:start_date',
-    ]);
+    {
+        $validated = $request->validate([
+            'delegatee_id' => 'required|exists:users,id',
+            'start_date' => 'required|date|after_or_equal:today',
+            'end_date' => 'required|date|after_or_equal:start_date',
+        ]);
 
-    $delegation = Delegation::create([
-        'delegator_id' => Auth::id(),
-        'delegatee_id' => $validated['delegatee_id'],
-        'start_date'   => $validated['start_date'],
-        'end_date'     => $validated['end_date'],
-        'status'       => 'active',
-    ]);
+        $delegation = Delegation::create([
+            'delegator_id' => Auth::id(),
+            'delegatee_id' => $validated['delegatee_id'],
+            'start_date' => $validated['start_date'],
+            'end_date' => $validated['end_date'],
+            'status' => 'active',
+        ]);
 
-    // GEÇİCİ KONTROL 1: Servis çağrılmadan önce durdur
-    // dd("Delegation oluştu, servise gidiliyor...", $delegation->toArray());
+        $notificationService->delegationAssigned($delegation);
 
-    $notificationService->delegationAssigned($delegation);
-
-    return redirect()->back()->with('success', 'Vekalet başarıyla tanımlandı.');
-}
+        return redirect()->back()->with('success', 'Vekalet başarıyla tanımlandı.');
+    }
 
     public function destroy(Delegation $delegation)
     {
