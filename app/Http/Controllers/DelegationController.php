@@ -44,8 +44,8 @@ class DelegationController extends Controller
         }
 
         // İsteğe bağlı olarak soft delete veya status = inactive yapılabilir
-        $delegation->update(['status' => 'inactive']);
-        // $delegation->delete(); // Alternatif
+        //$delegation->update(['status' => 'inactive']);
+        $delegation->delete(); // Alternatif
 
         return redirect()->back()->with('success', 'Vekalet iptal edildi.');
     }
