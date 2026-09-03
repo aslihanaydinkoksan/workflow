@@ -9,11 +9,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use App\Models\User;
+use App\Services\NotificationService;
 
 
 class DelegationController extends Controller
 {
-    public function store(Request $request)
+    public function store(Request $request, NotificationService $notificationService)
     {
         $validated = $request->validate([
             'delegatee_id' => 'required|exists:users,id',
@@ -21,13 +22,16 @@ class DelegationController extends Controller
             'end_date'     => 'required|date|after_or_equal:start_date',
         ]);
 
-        Delegation::create([
+        $delegation = Delegation::create([
             'delegator_id' => Auth::id(),
             'delegatee_id' => $validated['delegatee_id'],
             'start_date'   => $validated['start_date'],
             'end_date'     => $validated['end_date'],
-            'status'       => 'active', // Default aktif
+            'status'       => 'active',
         ]);
+
+        // YENİ: Bildirimi Tetikle
+        $notificationService->delegationAssigned($delegation);
 
         return redirect()->back()->with('success', 'Vekalet başarıyla tanımlandı.');
     }

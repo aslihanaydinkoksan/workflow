@@ -82,6 +82,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/tasks/{task}', [\App\Http\Controllers\TaskController::class, 'show'])->name('tasks.show');
     Route::post('/tasks/{task}', [\App\Http\Controllers\TaskController::class, 'update'])->name('tasks.update');
     Route::post('/tasks/{task}/undo', [\App\Http\Controllers\TaskController::class, 'undo'])->name('tasks.undo');
+    // YENİ EKLENEN DIŞA AKTARIM (EXPORT) ROTALARI
+    Route::get('/tasks/{task}/export/pdf', [\App\Http\Controllers\TaskController::class, 'exportPdf'])->name('tasks.export.pdf');
+    Route::get('/tasks/{task}/export/excel', [\App\Http\Controllers\TaskController::class, 'exportExcel'])->name('tasks.export.excel');
     // Vekalet Rotaları
     Route::post('/delegations', [\App\Http\Controllers\DelegationController::class, 'store'])->name('delegations.store');
     Route::delete('/delegations/{delegation}', [\App\Http\Controllers\DelegationController::class, 'destroy'])->name('delegations.destroy');

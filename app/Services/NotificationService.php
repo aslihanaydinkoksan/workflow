@@ -41,6 +41,33 @@ class NotificationService
             ]
         );
     }
+    public function delegationAssigned(\App\Models\Delegation $delegation): void
+    {
+        $delegation->loadMissing(['delegator', 'delegatee']);
+        
+        $delegator = $delegation->delegator;
+        $delegatee = $delegation->delegatee;
+
+        if (! $delegator || ! $delegatee) {
+            return;
+        }
+
+        $startDate = \Carbon\Carbon::parse($delegation->start_date)->format('d.m.Y');
+        $endDate = \Carbon\Carbon::parse($delegation->end_date)->format('d.m.Y');
+
+        $this->send(
+            user: $delegatee,
+            type: 'delegation_assigned',
+            title: 'Yeni Vekalet Ataması',
+            body: "{$delegator->name} tarafından {$startDate} ile {$endDate} tarihleri arasında vekil olarak atandınız. Bu tarihler arasında ilgili görevler sizin ekranınıza düşecektir.",
+            task: null, // Bu bildirim belirli bir task'a değil, genel sisteme ait
+            data: [
+                'delegator_name' => $delegator->name,
+                'start_date'     => $startDate,
+                'end_date'       => $endDate,
+            ]
+        );
+    }
 
     public function taskRejected(ProcessInstance $instance, Task $task, User $rejectedBy, ?string $comment = null): void
     {

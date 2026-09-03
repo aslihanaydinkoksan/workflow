@@ -94,6 +94,7 @@ const formatDate = (value) => {
                             :model-value="previousForm.data || {}"
                             :template="previousForm.form"
                             :app-logo="appLogo"
+                            :task-id="task.id"
                             :disabled="true"
                         />
                         <div v-if="previousForm.comment" class="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
@@ -154,6 +155,7 @@ const formatDate = (value) => {
                                 v-model="form.answers"
                                 :template="subForm"
                                 :app-logo="appLogo"
+                                :task-id="task.id"
                             />
                         </div>
 

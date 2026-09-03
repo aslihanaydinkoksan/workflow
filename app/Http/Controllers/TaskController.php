@@ -15,7 +15,10 @@ use Illuminate\Support\Facades\Auth;
 use App\Models\User;
 use App\Models\UserNotification;
 use Illuminate\Support\Facades\Mail;
-
+use Barryvdh\DomPDF\Facade\Pdf;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Exports\TaskFormExport;
+use Illuminate\Support\Str;
 
 class TaskController extends Controller
 {
@@ -481,5 +484,84 @@ class TaskController extends Controller
             })
             ->values()
             ->all();
+    }
+    public function exportPdf(Task $task)
+    {
+        /** @var User $user */
+        $user = Auth::user();
+        $isAdmin = $user->hasRole('Admin') || $user->hasRole('superadmin');
+
+        $isAssigned = $isAdmin || TaskVisibility::userCanAccessTask($user, $task) || ($task->status !== 'pending' && $task->completed_by === $user->id);
+
+        if (!$isAssigned) {
+            abort(403, 'Bu görevi dışa aktarma yetkiniz yok.');
+        }
+
+        $task->load('processInstance.workflow.formTemplate');
+        $workflowNode = collect($task->processInstance->workflow->nodes ?? [])->firstWhere('id', $task->node_id);
+        $subFormId = $workflowNode['data']['subFormId'] ?? null;
+        $subForm = $subFormId ? FormTemplate::find($subFormId) : null;
+
+        if (!$subForm) {
+            return back()->with('error', 'Bu görev için tanımlı bir form bulunamadı.');
+        }
+
+        $instanceData = (array) ($task->processInstance->data ?? []);
+        $formData = $this->extractFormDataForTemplate($instanceData, $subForm);
+
+        $pdf = Pdf::loadView('pdf.task-detail', [
+            'templateName' => $subForm->name,
+            'description'  => $subForm->description,
+            'documentNo'   => $subForm->document_no,
+            'publishDate'  => $subForm->publish_date,
+            'revisionNo'   => $subForm->revision_no,
+            'revisionDate' => $subForm->revision_date,
+            'elements'     => $subForm->schema ?? [],
+            'formData'     => $formData,
+        ]);
+
+        $fileName = Str::slug($subForm->name) . '-' . $task->id . '.pdf';
+        return $pdf->download($fileName);
+    }
+
+    public function exportExcel(Task $task)
+    {
+        /** @var User $user */
+        $user = Auth::user();
+        $isAdmin = $user->hasRole('Admin') || $user->hasRole('superadmin');
+
+        $isAssigned = $isAdmin || TaskVisibility::userCanAccessTask($user, $task) || ($task->status !== 'pending' && $task->completed_by === $user->id);
+
+        if (!$isAssigned) {
+            abort(403, 'Bu görevi dışa aktarma yetkiniz yok.');
+        }
+
+        $task->load('processInstance.workflow');
+        $workflowNode = collect($task->processInstance->workflow->nodes ?? [])->firstWhere('id', $task->node_id);
+        $subFormId = $workflowNode['data']['subFormId'] ?? null;
+        $subForm = $subFormId ? FormTemplate::find($subFormId) : null;
+
+        if (!$subForm) {
+            return back()->with('error', 'Bu görev için tanımlı bir form bulunamadı.');
+        }
+
+        $instanceData = (array) ($task->processInstance->data ?? []);
+        $formData = $this->extractFormDataForTemplate($instanceData, $subForm);
+
+        // Excel için başlıkları Element Label'larına (Sorulara) çevir
+        $excelData = [];
+        $elements = $subForm->schema ?? [];
+        foreach ($elements as $el) {
+            if ($el['type'] === 'header') continue;
+
+            $val = $formData[$el['id']] ?? '';
+            if (is_array($val)) $val = implode(', ', $val);
+            elseif (is_bool($val)) $val = $val ? 'Evet' : 'Hayır';
+
+            $excelData[$el['label']] = empty($val) ? '-' : $val;
+        }
+
+        $fileName = Str::slug($subForm->name) . '-' . $task->id . '.xlsx';
+        return Excel::download(new TaskFormExport($excelData, $subForm->name), $fileName);
     }
 }
