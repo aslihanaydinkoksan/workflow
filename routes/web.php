@@ -136,7 +136,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::post('/', [\App\Http\Controllers\Admin\RuleController::class, 'store'])->name('store');
             Route::delete('/{rule}', [\App\Http\Controllers\Admin\RuleController::class, 'destroy'])->name('destroy');
             Route::get('/fields/{workflow}', [\App\Http\Controllers\Admin\RuleController::class, 'getAvailableFields'])->name('fields');
-            Route::get('/node/{workflow}/{node}', [\App\Http\Controllers\Admin\RuleController::class, 'getRulesByNode']);
+            Route::get('/node/{workflow}/{node}', [\App\Http\Controllers\Admin\RuleController::class, 'getRulesByNode'])->name('node');
             Route::put('/{rule}', [\App\Http\Controllers\Admin\RuleController::class, 'update'])->name('update');
         });
     });

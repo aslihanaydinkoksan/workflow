@@ -40,7 +40,7 @@ const OPERATORS = {
 const fetchExistingRules = async () => {
     if (!props.workflowId || !props.nodeId) return;
     try {
-        const response = await axios.get(`/admin/rules/node/${props.workflowId}/${props.nodeId}`);
+        const response = await axios.get(route('admin.rules.node', { workflow: props.workflowId, node: props.nodeId }));
         existingRules.value = response.data.rules || [];
     } catch (error) {
         console.error("Mevcut kurallar çekilirken hata oluştu:", error);
@@ -52,7 +52,7 @@ watch(() => props.show, async (newVal) => {
         resetForm();
         fetchExistingRules();
         try {
-            const response = await axios.get(`/admin/rules/fields/${props.workflowId}`);
+            const response = await axios.get(route('admin.rules.fields', { workflow: props.workflowId }));
             // Gelen alanların { value, label, type, options } formatında olduğunu varsayıyoruz
             availableFields.value = response.data.fields || [];
             if (ruleForm.value.conditions.length === 0) addCondition();
@@ -159,7 +159,7 @@ const ruleSummary = computed(() => {
 const deleteRule = async (ruleId) => {
     if (!confirm('Bu kuralı silmek istediğinize emin misiniz?')) return;
     try {
-        await axios.delete(`/admin/rules/${ruleId}`);
+        await axios.delete(route('admin.rules.destroy', { rule: ruleId }));
         await fetchExistingRules(); // Silince listeyi yenile
     } catch (error) {
         alert("Kural silinemedi.");
@@ -200,11 +200,11 @@ const saveRule = async () => {
     try {
         if (editingRuleId.value) {
             // Güncelleme Modu (PUT)
-            await axios.put(`/admin/rules/${editingRuleId.value}`, payload);
+            await axios.put(route('admin.rules.update', { rule: editingRuleId.value }), payload);
             alert("Kural başarıyla güncellendi!");
         } else {
             // Yeni Ekleme Modu (POST)
-            await axios.post('/admin/rules', payload);
+            await axios.post(route('admin.rules.store'), payload);
             alert("Kural başarıyla eklendi!");
         }
         resetForm();
