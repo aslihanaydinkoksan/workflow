@@ -1,3 +1,3 @@
 <template>
-    <img src="/logo.jpg" alt="Logo" />
+    <img src="/workflow_koksan/logo.jpg" alt="Logo" />
 </template>
