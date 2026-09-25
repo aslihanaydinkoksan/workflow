@@ -77,8 +77,14 @@ class LevhaCompleteWorkflowSeeder extends Seeder
         $uretimNode = Node::where('label', 'like', '%Üretim Birimi%')->first()
             ?? $rootNode;
 
-        $orgTreeType = TreeType::where('key', 'factory_hierarchy')->first() ?? TreeType::first();
-        $personelTreeType = TreeType::where('key', 'personel')->first() ?? TreeType::find(4);
+        $orgTreeType = TreeType::firstOrCreate(
+            ['key' => 'factory_hierarchy'],
+            ['display_name' => 'Fabrika Organizasyon Yapısı', 'is_active' => true]
+        );
+        $personelTreeType = TreeType::firstOrCreate(
+            ['key' => 'personel'],
+            ['display_name' => 'Personel / Yetkili', 'is_active' => true]
+        );
 
         // A) Levha Isletme Birimi Dugumu
         $levhaBirimNode = Node::where('label', 'Levha Üretim İşletmesi')->first();
