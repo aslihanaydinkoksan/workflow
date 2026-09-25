@@ -209,6 +209,9 @@ const getDueInfo = (task) => {
                                             <td class="px-6 py-4 whitespace-nowrap">
                                                 <div class="text-sm font-bold text-gray-900">{{
                                                     task.process_instance.workflow.name }}</div>
+                                                <div v-if="task.title && !task.title.startsWith('node_')" class="text-xs font-semibold text-indigo-600 mt-0.5">
+                                                    {{ task.title }}
+                                                </div>
                                                 <div class="text-xs text-gray-500 flex items-center mt-1">
                                                     <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor"
                                                         viewBox="0 0 24 24">
@@ -284,6 +287,9 @@ const getDueInfo = (task) => {
                                             <td class="px-6 py-4 whitespace-nowrap">
                                                 <div class="text-sm font-bold text-gray-900">{{
                                                     task.process_instance.workflow.name }}</div>
+                                                <div v-if="task.title && !task.title.startsWith('node_')" class="text-xs font-semibold text-indigo-600 mt-0.5">
+                                                    {{ task.title }}
+                                                </div>
                                                 <div class="text-xs text-gray-500 flex items-center mt-1">
                                                     <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor"
                                                         viewBox="0 0 24 24">

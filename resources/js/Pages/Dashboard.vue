@@ -27,6 +27,19 @@ const formatDate = (val) => {
     if (!val) return '-';
     return new Date(val).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 };
+
+const getTaskTitle = (task) => {
+    if (task.title && !task.title.startsWith('node_')) {
+        return task.title;
+    }
+    const typeMap = {
+        approval: 'Onay & Karar Görevi',
+        form: 'Form Doldurma Görevi',
+        review: 'İnceleme & Değerlendirme',
+        notification: 'Bilgilendirme Bildirimi',
+    };
+    return typeMap[task.type] || `Görev #${task.id}`;
+};
 </script>
 
 <template>
@@ -192,7 +205,7 @@ const formatDate = (val) => {
                                 </div>
                                 <div>
                                     <h4 class="font-bold text-gray-900 text-sm">
-                                        {{ task.title || task.node_id }}
+                                        {{ getTaskTitle(task) }}
                                     </h4>
                                     <div class="flex flex-wrap items-center gap-2 mt-1 text-xs text-gray-500">
                                         <span class="font-semibold text-gray-700">{{ task.process_instance?.workflow?.name || 'Süreç' }}</span>
