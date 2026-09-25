@@ -1,0 +1,1 @@
+import{_ as o}from"./_plugin-vue_export-helper-DlAUqK2U.js";import{e as c,c as e}from"./app-B7viR21k.js";const r={},t={src:"/workflow_koksan/logo.jpg",alt:"Logo"};function n(s,_){return c(),e("img",t)}const p=o(r,[["render",n]]);export{p as A};

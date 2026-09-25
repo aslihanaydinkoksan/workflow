@@ -88,14 +88,11 @@ class TaskManager
             'due_date'            => $this->resolveDueDate($nodeData),
         ]);
 
-        // 5. Görev E-postası Gönderimi (Eğer atanmış bir kullanıcı ID'si varsa)
+        // 5. Görev Bildirimi ve E-postası Gönderimi (Eğer atanmış bir kullanıcı ID'si varsa)
         if ($task->assigned_to) {
             // Eğer süreç kural motoru tarafından anında iptal/red edildiyse yeni görev maili atma!
             if (!in_array($instance->status, ['rejected', 'cancelled'])) {
-                $user = User::find($task->assigned_to);
-                if ($user && !empty($user->email)) {
-                    Mail::to($user->email)->queue(new TaskAssignedMail($task));
-                }
+                $this->notificationService->taskAssigned($task);
             }
         }
 

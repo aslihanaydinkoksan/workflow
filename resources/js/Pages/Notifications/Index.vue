@@ -11,6 +11,10 @@ const typeMeta = {
     task_rejected: { label: 'Red', className: 'bg-red-100 text-red-700' },
     task_due_soon: { label: 'Süre doluyor', className: 'bg-amber-100 text-amber-700' },
     task_overdue: { label: 'Süresi doldu', className: 'bg-orange-100 text-orange-700' },
+    workflow_completed: { label: 'Tamamlandı', className: 'bg-emerald-100 text-emerald-700' },
+    sample_follow_up: { label: 'Süreç Takibi', className: 'bg-purple-100 text-purple-700' },
+    system: { label: 'Sistem Uyarısı', className: 'bg-blue-100 text-blue-700' },
+    delegation_assigned: { label: 'Vekalet', className: 'bg-teal-100 text-teal-700' },
 };
 
 const getTypeMeta = (notification) => {

@@ -53,7 +53,7 @@ const getOptions = (optionsStr) => {
 // YENİ: ZIGGY İLE DOĞRUDAN BACKEND'E YÖNLENDİRME
 const exportToPDF = () => {
     if (!props.taskId) {
-        alert("Görev kimliği bulunamadı.");
+        console.warn("Görev kimliği bulunamadı.");
         return;
     }
     window.open(route('tasks.export.pdf', props.taskId), '_blank');
@@ -61,7 +61,7 @@ const exportToPDF = () => {
 
 const exportToExcel = () => {
     if (!props.taskId) {
-        alert("Görev kimliği bulunamadı.");
+        console.warn("Görev kimliği bulunamadı.");
         return;
     }
     // Excel dosyaları yeni sekme açmadan doğrudan indirme tetikler

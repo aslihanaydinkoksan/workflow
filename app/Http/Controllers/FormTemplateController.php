@@ -111,9 +111,12 @@ class FormTemplateController extends Controller
 
     public function destroy(FormTemplate $formTemplate)
     {
-        // İstekte bulunanın yetkisi kontrol edilebilir
+        if ($formTemplate->primaryWorkflows()->exists()) {
+            return back()->with('error', 'Bu form şablonu bir veya daha fazla iş akışına bağlı olduğu için silinemez. Önce ilgili akışlardaki bağlı formu kaldırınız.');
+        }
+
         $formTemplate->delete();
-        return redirect()->route('form-templates.index')->with('success', 'Form şablonu silindi.');
+        return redirect()->route('form-templates.index')->with('success', 'Form şablonu başarıyla silindi.');
     }
 
     public function toggleStatus(FormTemplate $formTemplate)
@@ -143,11 +146,14 @@ class FormTemplateController extends Controller
             $labelPrefix = $treeType->display_name . ' -> ';
 
             foreach ($schema as $col) {
-                // DİKKAT: Eski kodda $bindings[$prefix...] = ... şeklindeydi (Yani PHP bunu Object yapıyordu).
-                // ŞİMDİ dizinin içine yeni bir Dizi itiyoruz (Vue'nun beklediği Array yapısı).
+                $fieldKey = $col['field'] ?? $col['name'] ?? '';
+                $fieldLabel = $col['label'] ?? $col['name'] ?? $col['field'] ?? '';
+                if ($fieldKey === '') {
+                    continue;
+                }
                 $bindings[] = [
-                    'value'   => $prefix . $col['field'],
-                    'label'   => $labelPrefix . $col['field'],
+                    'value'   => $prefix . $fieldKey,
+                    'label'   => $labelPrefix . $fieldLabel,
                     'type'    => $col['type'] ?? 'string',
                     'options' => $col['options'] ?? null
                 ];

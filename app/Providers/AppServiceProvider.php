@@ -4,8 +4,6 @@ namespace App\Providers;
 
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
-use App\Models\Node;
-use App\Observers\NodeObserver;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\Transports\MicrosoftGraphTransport;
 

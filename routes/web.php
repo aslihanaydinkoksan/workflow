@@ -63,19 +63,30 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::resource('workflows', App\Http\Controllers\WorkflowController::class);
     });
 
-    // Süreç Başlatma ve İzleme (Sadece 'start_processes' yetkisi olanlar)
+    // Süreç Başlatma (Sadece 'start_processes' yetkisi olanlar)
     Route::middleware('can:start_processes')->group(function () {
         Route::get('/processes', [\App\Http\Controllers\ProcessController::class, 'index'])->name('processes.index');
+        Route::get('/processes/start', fn() => redirect()->route('processes.index'))->name('processes.start');
         Route::get('/processes/create/{workflow}', [\App\Http\Controllers\ProcessController::class, 'create'])->name('processes.create');
         Route::post('/processes/{workflow}', [\App\Http\Controllers\ProcessController::class, 'store'])->name('processes.store');
-        Route::get('/processes/history', [\App\Http\Controllers\ProcessController::class, 'history'])->name('processes.history');
-        Route::get('/processes/department', [\App\Http\Controllers\ProcessController::class, 'department'])->name('processes.department');
-        Route::get('/processes/{instance}/tracker', [\App\Http\Controllers\ProcessController::class, 'tracker'])->name('processes.tracker');
     });
+
+    // Süreç İzleme, Geçmiş ve Sertifika (Yetki kontrolleri ilgili Controller metodlarında yapılır)
+    Route::get('/processes/history', [\App\Http\Controllers\ProcessController::class, 'history'])->name('processes.history');
+    Route::get('/processes/department', [\App\Http\Controllers\ProcessController::class, 'department'])->name('processes.department')->middleware('can:processes.view_department');
+    Route::get('/processes/{instance}/tracker', [\App\Http\Controllers\ProcessController::class, 'tracker'])->name('processes.tracker');
+    Route::get('/processes/{instance}/certificate', [\App\Http\Controllers\ProcessController::class, 'exportCertificate'])->name('processes.certificate');
+    Route::get('/processes/{instance}/travel-order', [\App\Http\Controllers\ProcessController::class, 'exportTravelOrder'])->name('processes.travel-order');
 
     Route::middleware('can:processes.cancel')->group(function () {
         Route::post('/processes/{instance}/cancel', [\App\Http\Controllers\ProcessController::class, 'cancel'])->name('processes.cancel');
     });
+
+    // Zamanlanmış Takip ve Anket Rotaları (Generic BPM Follow-up)
+    Route::get('/follow-ups', [\App\Http\Controllers\FollowUpController::class, 'index'])->name('follow-ups.index');
+    Route::get('/follow-ups/{followUp}', [\App\Http\Controllers\FollowUpController::class, 'show'])->name('follow-ups.show');
+    Route::post('/follow-ups/{followUp}', [\App\Http\Controllers\FollowUpController::class, 'update'])->name('follow-ups.update');
+    Route::post('/follow-ups/{followUp}/retry-sap', [\App\Http\Controllers\FollowUpController::class, 'retrySap'])->name('follow-ups.retry-sap');
 
     // Görevlerim (Tüm kullanıcılar kendi görevlerini görebilmeli)
     Route::get('/tasks', [\App\Http\Controllers\TaskController::class, 'index'])->name('tasks.index');
@@ -85,6 +96,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // YENİ EKLENEN DIŞA AKTARIM (EXPORT) ROTALARI
     Route::get('/tasks/{task}/export/pdf', [\App\Http\Controllers\TaskController::class, 'exportPdf'])->name('tasks.export.pdf');
     Route::get('/tasks/{task}/export/excel', [\App\Http\Controllers\TaskController::class, 'exportExcel'])->name('tasks.export.excel');
+    Route::get('/tasks/{task}/export/certificate', [\App\Http\Controllers\TaskController::class, 'exportCertificate'])->name('tasks.export.certificate');
     // Vekalet Rotaları
     Route::post('/delegations', [\App\Http\Controllers\DelegationController::class, 'store'])->name('delegations.store');
     Route::delete('/delegations/{delegation}', [\App\Http\Controllers\DelegationController::class, 'destroy'])->name('delegations.destroy');
@@ -118,16 +130,18 @@ Route::middleware(['auth', 'verified'])->group(function () {
         // Form Kategorileri
         Route::resource('form-categories', \App\Http\Controllers\Admin\FormCategoryController::class)->only(['index', 'store', 'update', 'destroy'])->middleware('can:create_forms');
 
-        // Hiyerarşi Testi
+        // Hiyerarşi Yönetimi
+        Route::get('hierarchy', [\App\Http\Controllers\Admin\HierarchyTestController::class, 'index'])->name('hierarchy.index')->middleware('can:view_admin_panel');
         Route::get('hierarchy-test', [\App\Http\Controllers\Admin\HierarchyTestController::class, 'index'])->name('hierarchy.test')->middleware('can:view_admin_panel');
-        Route::prefix('hierarchy/nodes')->name('hierarchy.nodes.')->group(function () {
+        Route::prefix('hierarchy/nodes')->name('hierarchy.nodes.')->middleware('can:view_admin_panel')->group(function () {
             Route::post('/', [\App\Http\Controllers\Admin\HierarchyTestController::class, 'store'])->name('store');
             Route::put('/{node}', [\App\Http\Controllers\Admin\HierarchyTestController::class, 'update'])->name('update');
             Route::delete('/{node}', [\App\Http\Controllers\Admin\HierarchyTestController::class, 'destroy'])->name('destroy');
             Route::patch('/{node}/move', [\App\Http\Controllers\Admin\HierarchyTestController::class, 'move'])->name('move');
-            Route::put('hierarchy/tree-types/{treeType}/schema', [\App\Http\Controllers\Admin\HierarchyTestController::class, 'updateSchema'])->name('hierarchy.tree-types.schema.update');
         });
-        Route::prefix('tree-types')->name('tree-types.')->group(function () {
+        // Ağaç Tipi Şema Güncelleme — ayrı prefix altında (önceden hierarchy/nodes altında hatalıydı)
+        Route::put('hierarchy/tree-types/{treeType}/schema', [\App\Http\Controllers\Admin\HierarchyTestController::class, 'updateSchema'])->name('hierarchy.tree-types.schema.update')->middleware('can:view_admin_panel');
+        Route::prefix('tree-types')->name('tree-types.')->middleware('can:view_admin_panel')->group(function () {
             Route::get('/', [\App\Http\Controllers\Admin\TreeTypeController::class, 'index'])->name('index');
             Route::post('/', [\App\Http\Controllers\Admin\TreeTypeController::class, 'store'])->name('store');
             Route::put('/{treeType}', [\App\Http\Controllers\Admin\TreeTypeController::class, 'update'])->name('update');

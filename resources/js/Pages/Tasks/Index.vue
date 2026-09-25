@@ -8,7 +8,11 @@ const props = defineProps({
     completedTasks: Array,
     users: Array,
     given_delegations: Array,
-    received_delegations: Array
+    received_delegations: Array,
+    pending_follow_ups: {
+        type: Array,
+        default: () => [],
+    }
 });
 
 const activeTab = ref('pending'); // 'pending' or 'completed'
@@ -40,8 +44,7 @@ const submitDelegation = () => {
         onSuccess: () => {
             delegationForm.reset();
             searchQuery.value = '';
-            alert("Vekalet başarıyla tanımlandı!");
-            isDelegationPanelOpen.value = false; // Başarılı olunca paneli kapatmak iyi bir UX'tir
+            isDelegationPanelOpen.value = false;
         }
     });
 };
@@ -143,11 +146,39 @@ const getDueInfo = (task) => {
 
                         <!-- Pending Tasks Tab -->
                         <div v-if="activeTab === 'pending'">
-                            <div v-if="tasks.length === 0" class="text-center py-8 text-gray-500">
+                            <!-- Zamanı Gelen Numune / Süreç Takipleri -->
+                            <div v-if="pending_follow_ups && pending_follow_ups.length > 0" class="mb-6 space-y-3">
+                                <div v-for="fu in pending_follow_ups" :key="fu.id"
+                                    class="p-4 bg-gradient-to-r from-sky-50 to-indigo-50 border border-sky-200 rounded-xl flex items-center justify-between shadow-sm">
+                                    <div class="flex items-center gap-3">
+                                        <div
+                                            class="w-10 h-10 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center font-bold text-lg shrink-0">
+                                            🧪
+                                        </div>
+                                        <div>
+                                            <div class="flex items-center gap-2">
+                                                <span
+                                                    class="text-xs font-bold px-2 py-0.5 rounded-full bg-sky-200 text-sky-800">Numune
+                                                    & Süreç Takibi</span>
+                                                <span class="text-xs text-gray-500">Talep #{{ fu.process_instance_id
+                                                    }}</span>
+                                            </div>
+                                            <h4 class="text-sm font-bold text-gray-900 mt-0.5">{{ fu.title }}</h4>
+                                            <p class="text-xs text-gray-600 mt-0.5">{{ fu.prompt }}</p>
+                                        </div>
+                                    </div>
+                                    <Link :href="route('follow-ups.show', fu.id)"
+                                        class="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-lg shadow transition shrink-0 ml-4">
+                                    Takibi Yanıtla →
+                                    </Link>
+                                </div>
+                            </div>
+
+                            <div v-if="tasks.length === 0 && (!pending_follow_ups || pending_follow_ups.length === 0)" class="text-center py-8 text-gray-500">
                                 Şu an bekleyen bir göreviniz bulunmuyor. Harika! 🎉
                             </div>
 
-                            <div v-else class="overflow-x-auto">
+                            <div v-if="tasks.length > 0" class="overflow-x-auto">
                                 <table class="min-w-full divide-y divide-gray-200">
                                     <thead class="bg-gray-50">
                                         <tr>

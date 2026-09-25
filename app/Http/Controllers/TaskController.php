@@ -55,12 +55,23 @@ class TaskController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
+        // Aktif / Bekleyen Numune ve Süreç Takipleri (Follow-Ups)
+        $pendingFollowUps = \App\Models\FollowUp::where('status', 'pending')
+            ->where(function ($q) use ($user) {
+                $q->where('assigned_to', $user->id)
+                  ->orWhereHas('processInstance', fn($sub) => $sub->where('started_by', $user->id));
+            })
+            ->orderBy('scheduled_at')
+            ->with(['processInstance.workflow', 'processInstance.starter'])
+            ->get();
+
         return Inertia::render('Tasks/Index', [
             'tasks'                => $tasks,
             'completedTasks'       => $completedTasks,
             'users'                => $users, // Yeni Prop
             'given_delegations'    => $givenDelegations, // Yeni Prop
-            'received_delegations' => $receivedDelegations // Yeni Prop
+            'received_delegations' => $receivedDelegations, // Yeni Prop
+            'pending_follow_ups'   => $pendingFollowUps,
         ]);
     }
 
@@ -158,6 +169,43 @@ class TaskController extends Controller
             );
         }
 
+        // KOŞULLU DOĞRULAMA (İş Akışı Elemanları Onay Düğümü Doğrulaması)
+        if ($action !== 'reject') {
+            $workflowNode = collect($task->processInstance->workflow->nodes ?? [])->firstWhere('id', $task->node_id);
+            $allData = array_merge((array) $task->processInstance->data, (array) ($formData ?? []));
+
+            // 1. Akış Tasarımcısı (Designer) Koşullu Alan Doğrulaması (Generic: termin, fatura_no, dosya_no vb.)
+            if (!empty($workflowNode['data']['requireFieldOnApprove'])) {
+                $requiredKey = trim($workflowNode['data']['requiredFieldName'] ?? '');
+                if ($requiredKey !== '') {
+                    $val = $allData[$requiredKey] ?? null;
+                    if ($val === null || $val === '') {
+                        $errMsg = !empty($workflowNode['data']['requiredFieldErrorMessage'])
+                            ? $workflowNode['data']['requiredFieldErrorMessage']
+                            : "Bu adımı onaylayabilmek için '{$requiredKey}' alanının doldurulması zorunludur.";
+                        return back()->with('error', $errMsg);
+                    }
+                }
+            }
+
+            // 2. Geriye Dönük Uyumluluk (Numune Kabul / Termin Bildirimi)
+            $nodeRequiresTermin = !empty($workflowNode['data']['requireTermin'])
+                || !empty($workflowNode['data']['require_termin']);
+
+            $nodeLabel = mb_strtolower(($workflowNode['data']['customName'] ?? '') . ' ' . ($workflowNode['data']['label'] ?? ''), 'UTF-8');
+            $isAcceptanceNode = str_contains($nodeLabel, 'kabul') || str_contains($nodeLabel, 'isletme') || str_contains($nodeLabel, 'termin');
+
+            $hasTerminField = array_key_exists('termin_tarihi', $allData)
+                || array_key_exists('termin_araligi', $allData)
+                || array_key_exists('termin', $allData);
+
+            $terminValue = $allData['termin_tarihi'] ?? $allData['termin_araligi'] ?? $allData['termin'] ?? null;
+
+            if (($nodeRequiresTermin || ($isAcceptanceNode && $hasTerminField)) && empty($terminValue)) {
+                return back()->with('error', 'Numuneyi kabul ederken bir termin tarihi / aralığı bildirmek zorunludur.');
+            }
+        }
+
         if ($action === 'reject') {
             $manager->rejectTask($task, $comment);
             $manager->cancelPendingTasksForNode($task->processInstance, $task->node_id, $task->id);
@@ -194,22 +242,36 @@ class TaskController extends Controller
                 $starter = $instance->starter; // Süreci başlatan kullanıcı
 
                 if ($starter) {
+                    $workflowName = $instance->workflow->name ?? 'İş Akışı';
+                    $isSample = !empty($instance->workflow->follow_up_enabled)
+                        || !empty($instance->workflow->is_sample_workflow)
+                        || str_contains(mb_strtolower($workflowName, 'UTF-8'), 'numune')
+                        || str_contains(mb_strtolower($workflowName, 'UTF-8'), 'sample');
+
+                    if ($isSample) {
+                        app(\App\Services\FollowUpService::class)->scheduleFollowUp($instance);
+                    }
+
                     // 1. Veritabanı Bildirimi (user_notifications tablosu için)
+                    $bodyText = $isSample
+                        ? "Harika haber! #{$instance->id} numaralı numune talebiniz ve analiz süreçleri tamamlanmıştır. Analiz sertifikanızı indirebilirsiniz."
+                        : "Harika haber! #{$instance->id} numaralı {$workflowName} talebiniz tüm onaylardan geçmiş ve başarıyla tamamlanmıştır.";
+
                     UserNotification::create([
                         'user_id' => $starter->id,
-                        'type'    => 'workflow_completed', // Veritabanının beklediği type alanı
+                        'type'    => 'workflow_completed',
                         'title'   => 'Süreç Başarıyla Tamamlandı',
-                        'body'    => 'Harika haber! SAP EWM Yetki ve Donanım talebiniz tüm onaylardan geçmiş ve başarıyla tamamlanmıştır. Cihazınızı ambar biriminden teslim alabilirsiniz.',
+                        'body'    => $bodyText,
                         'task_id' => $task->id,
                         'read_at' => null,
                     ]);
-                    // 2. E-Posta Gönderimi (aslihan.aydin@koksan.com adresine)
+                    // 2. E-Posta Gönderimi
                     if (!empty($starter->email)) {
                         Mail::raw(
-                            'Harika haber! SAP EWM Yetki ve Donanım talebiniz tüm onaylardan geçmiş ve başarıyla tamamlanmıştır. Cihazınızı ambar biriminden teslim alabilirsiniz.',
-                            function ($message) use ($starter) {
+                            $bodyText,
+                            function ($message) use ($starter, $instance) {
                                 $message->to($starter->email)
-                                    ->subject('Talep Süreciniz Tamamlandı');
+                                    ->subject("Talep Süreciniz Tamamlandı (#{$instance->id})");
                             }
                         );
                     }
@@ -563,5 +625,26 @@ class TaskController extends Controller
 
         $fileName = Str::slug($subForm->name) . '-' . $task->id . '.xlsx';
         return Excel::download(new TaskFormExport($excelData, $subForm->name), $fileName);
+    }
+
+    public function exportCertificate(Task $task, \App\Services\CertificateGenerator $generator)
+    {
+        /** @var User $user */
+        $user = Auth::user();
+        $isAdmin = $user->hasRole('Admin') || $user->hasRole('superadmin');
+
+        $isAssigned = $isAdmin
+            || TaskVisibility::userCanAccessTask($user, $task)
+            || ($task->status !== 'pending' && $task->completed_by === $user->id)
+            || $task->processInstance->started_by === $user->id;
+
+        if (!$isAssigned) {
+            abort(403, 'Bu analiz sertifikasını indirme yetkiniz bulunmuyor.');
+        }
+
+        $pdf = $generator->generate($task->processInstance);
+        $fileName = 'Analiz-Sertifikasi-PI-' . $task->process_instance_id . '.pdf';
+
+        return $pdf->download($fileName);
     }
 }

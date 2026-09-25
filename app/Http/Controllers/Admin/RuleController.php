@@ -116,7 +116,10 @@ class RuleController extends Controller
             $labelPrefix = $treeType->display_name . ' -> ';
 
             foreach ($schema as $col) {
-                $metaField = $col['field'] ?? '';
+                $metaField = $col['field'] ?? $col['name'] ?? '';
+                if ($metaField === '') {
+                    continue;
+                }
                 $rawType = strtolower($col['type'] ?? 'string');
 
                 // Seçenekleri Array formatına çeviriyoruz

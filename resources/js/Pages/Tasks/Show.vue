@@ -1,7 +1,7 @@
 <script setup>
-import { onMounted } from 'vue';
+import { computed, onMounted } from 'vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import { Head, useForm } from '@inertiajs/vue3';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import FormRenderer from '@/Components/FormRenderer.vue';
 
 const props = defineProps({
@@ -27,19 +27,51 @@ const props = defineProps({
     },
 });
 
+const isTerminRequired = computed(() => {
+    return !!(props.nodeData?.data?.requireTermin || props.nodeData?.data?.require_termin);
+});
+
+const isRequiredFieldOnApprove = computed(() => {
+    return !!(props.nodeData?.data?.requireFieldOnApprove && props.nodeData?.data?.requiredFieldName);
+});
+
 const form = useForm({
     task_action: '',
     comment: '',
-    answers: { ...props.prefilledFormData },
+    answers: {
+        isletme_karari: props.initialData?.isletme_karari || 'Kabul Edildi',
+        termin_araligi: props.initialData?.termin_araligi || '',
+        isletme_notu: props.initialData?.isletme_notu || '',
+        ...props.prefilledFormData,
+    },
 });
 
 onMounted(() => {
     if (props.prefilledFormData && Object.keys(props.prefilledFormData).length > 0) {
-        form.answers = { ...props.prefilledFormData };
+        form.answers = { ...form.answers, ...props.prefilledFormData };
     }
 });
 
 const submitAction = (actionType) => {
+    if (actionType === 'approve') {
+        if (isTerminRequired.value && (!form.answers.termin_araligi || !String(form.answers.termin_araligi).trim())) {
+            alert('Numuneyi onaylamak için lütfen Termin Aralığı bildiriniz!');
+            return;
+        }
+
+        if (isRequiredFieldOnApprove.value) {
+            const reqKey = props.nodeData?.data?.requiredFieldName;
+            if (!form.answers[reqKey] || !String(form.answers[reqKey]).trim()) {
+                alert(props.nodeData?.data?.requiredFieldErrorMessage || `'${reqKey}' alanının doldurulması zorunludur.`);
+                return;
+            }
+        }
+    }
+
+    if (form.answers.isletme_notu && !form.comment) {
+        form.comment = form.answers.isletme_notu;
+    }
+
     form.task_action = actionType;
     form.post(route('tasks.update', props.task.id));
 };
@@ -55,9 +87,44 @@ const formatDate = (value) => {
 
     <AuthenticatedLayout>
         <template #header>
-            <h2 class="font-semibold text-xl text-gray-800 leading-tight">
-                {{ task.process_instance.workflow.name }} - {{ nodeData?.label || 'Görev' }}
-            </h2>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <div class="flex items-center gap-2 text-xs text-gray-500 mb-1">
+                        <Link :href="route('dashboard')" class="hover:text-indigo-600 transition-colors flex items-center gap-1">
+                            <span>🏠</span> Ana Sayfa
+                        </Link>
+                        <span>/</span>
+                        <Link :href="route('tasks.index')" class="hover:text-indigo-600 transition-colors">
+                            📥 İş Listem
+                        </Link>
+                        <span>/</span>
+                        <span class="text-gray-700 font-semibold">Görev #{{ task.id }}</span>
+                    </div>
+
+                    <h2 class="font-extrabold text-2xl text-gray-900 leading-tight flex items-center gap-2">
+                        <span>{{ task.process_instance.workflow.name }}</span>
+                        <span class="text-gray-400 font-normal">·</span>
+                        <span class="text-indigo-600">{{ nodeData?.label || 'Görev' }}</span>
+                    </h2>
+                </div>
+
+                <div class="flex items-center gap-2 shrink-0">
+                    <Link
+                        :href="route('processes.tracker', task.process_instance_id)"
+                        class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 shadow-sm transition-colors"
+                        title="Bu sürecin genel ilerleyişini ve şemasını gör"
+                    >
+                        <span>🔍</span> Süreç Akışını Gör
+                    </Link>
+
+                    <Link
+                        :href="route('tasks.index')"
+                        class="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl text-xs font-semibold text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 shadow-sm transition-colors"
+                    >
+                        <span>&larr;</span> İş Listem
+                    </Link>
+                </div>
+            </div>
         </template>
 
         <div class="py-12">
@@ -159,6 +226,74 @@ const formatDate = (value) => {
                             />
                         </div>
 
+                        <!-- İşletme Kabul & Termin Bildirimi Bölümü (requireTermin aktifse) -->
+                        <div v-if="task.status === 'pending' && isTerminRequired" class="mb-6 rounded-xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 to-orange-50/50 p-5 shadow-sm">
+                            <div class="flex items-center gap-3 mb-4 border-b border-amber-200/80 pb-3">
+                                <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500 text-white shadow-sm">
+                                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                </div>
+                                <div>
+                                    <h4 class="text-base font-bold text-amber-950">İşletme Kabul ve Termin Bildirimi</h4>
+                                    <p class="text-xs text-amber-800">Numuneyi onaylayabilmek için termin aralığı ve değerlendirmenizi giriniz.</p>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">
+                                        İşletme Değerlendirme Kararı <span class="text-red-500">*</span>
+                                    </label>
+                                    <select 
+                                        v-model="form.answers.isletme_karari" 
+                                        class="w-full text-sm rounded-lg border-gray-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 bg-white"
+                                    >
+                                        <option value="Kabul Edildi">Kabul Edildi</option>
+                                        <option value="Şartlı Kabul">Şartlı Kabul</option>
+                                        <option value="Reddedildi">Reddedildi</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">
+                                        Termin Aralığı / Tahmini Teslim <span class="text-red-500">*</span>
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        v-model="form.answers.termin_araligi" 
+                                        placeholder="Örn: 05.10.2026 - 10.10.2026 (7 İş Günü)" 
+                                        class="w-full text-sm rounded-lg border-gray-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 bg-white"
+                                        required
+                                    />
+                                </div>
+
+                                <div class="md:col-span-2">
+                                    <label class="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">
+                                        İşletme Notu / Planlama Açıklaması
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        v-model="form.answers.isletme_notu" 
+                                        placeholder="Örn: Betapak kalıp ölçülerine uygundur, üretim planına alındı." 
+                                        class="w-full text-sm rounded-lg border-gray-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 bg-white"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Koşullu Alan Girişi (requireFieldOnApprove aktifse) -->
+                        <div v-if="task.status === 'pending' && isRequiredFieldOnApprove" class="mb-6 rounded-xl border border-indigo-200 bg-indigo-50/70 p-5 shadow-sm">
+                            <label class="block text-xs font-bold text-indigo-950 uppercase tracking-wide mb-1.5">
+                                {{ nodeData?.data?.requiredFieldName }} <span class="text-red-500">*</span>
+                            </label>
+                            <input 
+                                type="text" 
+                                v-model="form.answers[nodeData.data.requiredFieldName]" 
+                                :placeholder="nodeData?.data?.requiredFieldErrorMessage || `${nodeData.data.requiredFieldName} değerini giriniz`" 
+                                class="w-full text-sm rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 bg-white"
+                                required
+                            />
+                        </div>
+
                         <!-- Yorum Alanı -->
                         <div v-if="task.type === 'approval' || task.type === 'form' || (task.type === 'review' && nodeData?.data?.rejectEnabled)" class="mb-6">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Görev Notu / Yorumunuz (Opsiyonel)</label>
@@ -234,6 +369,10 @@ const formatDate = (value) => {
                                     <span v-else-if="task.status === 'revised'" class="text-orange-600 font-bold">Revize İstediniz</span>.
                                 </p>
                                 <p v-if="task.comment" class="text-sm italic text-gray-500">Notunuz: "{{ task.comment }}"</p>
+                                <div v-if="initialData?.termin_araligi" class="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 text-xs font-semibold text-amber-900">
+                                    <span>📅 Bildirilen Termin: <strong>{{ initialData.termin_araligi }}</strong></span>
+                                    <span v-if="initialData?.isletme_karari" class="text-amber-700">| Karar: {{ initialData.isletme_karari }}</span>
+                                </div>
                             </div>
                             
                             <div class="flex justify-end">

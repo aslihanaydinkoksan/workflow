@@ -6,3 +6,4 @@
 /storage/*.key
 /bootstrap/cache/*
 /public/storage
+/scratch

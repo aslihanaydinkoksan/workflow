@@ -10,13 +10,12 @@ use App\Models\TreeType;
 use App\Models\User;
 use App\Models\Department;
 use App\Models\Directorate;
-use Illuminate\View\View;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Collection;
 use App\Services\HierarchyManagementService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -86,10 +85,16 @@ class HierarchyTestController extends Controller
             }
         }
 
-        // GÖREV 1: Tüm İlişkisel Varlıkların Çekilmesi
-        $users = User::select('id', 'name', 'email')->where('is_active', true)->get();
-        $departments = Department::select('id', 'name')->get();
-        $directorates = Directorate::select('id', 'name')->get();
+        // İlişkisel Varlıkların Çekilmesi (Performans için 5 dakikalık Cache)
+        $users = Cache::remember('hierarchy_users_active', 300, function () {
+            return User::select('id', 'name', 'email')->where('is_active', true)->orderBy('name')->get();
+        });
+        $departments = Cache::remember('hierarchy_departments', 300, function () {
+            return Department::select('id', 'name')->orderBy('name')->get();
+        });
+        $directorates = Cache::remember('hierarchy_directorates', 300, function () {
+            return Directorate::select('id', 'name')->orderBy('name')->get();
+        });
 
         return Inertia::render('Admin/Hierarchy/Test', [
             'nodes'        => $tree,
@@ -97,7 +102,7 @@ class HierarchyTestController extends Controller
             'treeType'     => $treeType,
             'treeTypes'    => $treeTypes,
             'users'        => $users,
-            'departments' => $departments,
+            'departments'  => $departments,
             'directorates' => $directorates
         ]);
     }
@@ -122,6 +127,9 @@ class HierarchyTestController extends Controller
         ];
     }
 
+    /**
+     * Yeni düğüm oluşturur. Tüm iş mantığı Service'e delege edilmiştir.
+     */
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -130,75 +138,92 @@ class HierarchyTestController extends Controller
             'label'        => 'required|string|max:255',
             'node_subtype' => 'nullable|string|max:50',
             'metadata'     => 'nullable|array',
-            'user_id'      => 'nullable|integer|exists:users,id', // Eklenen Alan
+            'user_id'      => 'nullable|integer|exists:users,id',
         ]);
 
-        $validated['key'] = Str::slug($validated['label']) . '_' . uniqid();
-
-        DB::beginTransaction();
         try {
-            // GÖREV 3: Kayıt anında user_id dahil ediliyor (Departman/Direktörlük ID'leri Vue'dan metadata içinde gelecek)
-            $node = Node::create([
-                'tree_type_id' => $validated['tree_type_id'],
-                'key'          => $validated['key'],
-                'label'        => $validated['label'],
-                'node_subtype' => $validated['node_subtype'] ?? null,
-                'metadata'     => $validated['metadata'] ?? [],
-                'user_id'      => $validated['user_id'] ?? null,
-                'is_active'    => true,
-            ]);
+            $node = $this->hierarchyService->createNode(
+                [
+                    'tree_type_id' => $validated['tree_type_id'],
+                    'label'        => $validated['label'],
+                    'node_subtype' => $validated['node_subtype'] ?? null,
+                    'metadata'     => $validated['metadata'] ?? [],
+                    'user_id'      => $validated['user_id'] ?? null,
+                    'is_active'    => true,
+                ],
+                $validated['parent_id'] ?? null
+            );
 
-            DB::table('node_closures')->insert([
-                'ancestor_id'   => $node->id,
-                'descendant_id' => $node->id,
-                'depth'         => 0,
-            ]);
-
-            if (!empty($validated['parent_id'])) {
-                $ancestors = DB::table('node_closures')
-                    ->where('descendant_id', $validated['parent_id'])
-                    ->get();
-
-                $closures = [];
-                foreach ($ancestors as $ancestor) {
-                    $closures[] = [
-                        'ancestor_id'   => $ancestor->ancestor_id,
-                        'descendant_id' => $node->id,
-                        'depth'         => $ancestor->depth + 1,
-                    ];
-                }
-
-                DB::table('node_closures')->insert($closures);
-            }
-
-            DB::commit();
             return response()->json(['success' => true, 'node' => $node]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Doğrulama hatası.',
+                'errors'  => $e->errors(),
+            ], 422);
         } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+            report($e); // Hatayı logla ama kullanıcıya detay sızdırma
+            return response()->json([
+                'success' => false,
+                'message' => 'Düğüm oluşturulurken bir hata oluştu.'
+            ], 500);
         }
     }
 
+    /**
+     * Düğüm bilgilerini günceller.
+     */
     public function update(Request $request, Node $node): JsonResponse
     {
         $validated = $request->validate([
             'label'        => 'required|string|max:255',
             'node_subtype' => 'nullable|string|max:50',
             'metadata'     => 'nullable|array',
-            'user_id'      => 'nullable|integer|exists:users,id', // Eklenen Alan
+            'user_id'      => 'nullable|integer|exists:users,id',
         ]);
 
-        $updatedNode = $this->hierarchyService->updateNode($node, $validated);
-
-        return response()->json(['success' => true, 'node' => $updatedNode]);
+        try {
+            $updatedNode = $this->hierarchyService->updateNode($node, $validated);
+            return response()->json(['success' => true, 'node' => $updatedNode]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Doğrulama hatası.',
+                'errors'  => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            report($e);
+            return response()->json([
+                'success' => false,
+                'message' => 'Düğüm güncellenirken bir hata oluştu.'
+            ], 500);
+        }
     }
 
+    /**
+     * Düğümü ve tüm alt düğümlerini siler.
+     */
     public function destroy(Node $node): JsonResponse
     {
-        $this->hierarchyService->deleteNode($node);
-        return response()->json(['success' => true]);
+        try {
+            $this->hierarchyService->deleteNode($node);
+            return response()->json(['success' => true]);
+        } catch (\Exception $e) {
+            report($e);
+            return response()->json([
+                'success' => false,
+                'message' => 'Düğüm silinirken bir hata oluştu.'
+            ], 500);
+        }
     }
 
+    /**
+     * Düğümü yeni bir ebeveynin altına taşır.
+     */
     public function move(Request $request, Node $node): JsonResponse
     {
         $validated = $request->validate([
@@ -206,21 +231,33 @@ class HierarchyTestController extends Controller
         ]);
 
         try {
-            $newParent = $validated['new_parent_id'] ? Node::findOrFail($validated['new_parent_id']) : null;
+            $newParent = $validated['new_parent_id']
+                ? Node::findOrFail($validated['new_parent_id'])
+                : null;
+
             $this->hierarchyService->moveNode($node, $newParent);
 
             return response()->json(['success' => true]);
-        } catch (\Exception $e) {
+        } catch (\InvalidArgumentException $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        } catch (\Exception $e) {
+            report($e);
+            return response()->json([
+                'success' => false,
+                'message' => 'Düğüm taşınırken bir hata oluştu.'
+            ], 500);
         }
     }
 
+    /**
+     * Ağaç tipi JSON şemasını günceller.
+     */
     public function updateSchema(Request $request, TreeType $treeType): JsonResponse
     {
         $validated = $request->validate([
             'schema'            => 'nullable|array',
             'schema.*.field'    => 'required|string',
-            'schema.*.type'     => 'required|string|in:string,integer,boolean,date',
+            'schema.*.type'     => 'required|string|in:string,integer,boolean,date,number,text,textarea,select,multiselect',
             'schema.*.required' => 'required|boolean',
         ]);
 

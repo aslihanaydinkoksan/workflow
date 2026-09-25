@@ -36,6 +36,10 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    directorates: {
+        type: Array,
+        default: () => [],
+    },
     roles: {
         type: Array,
         default: () => [],
@@ -95,21 +99,39 @@ onConnect((params) => {
     addEdges([params]);
 });
 
-const nodeTypes = [
-    { type: 'start', label: 'Başlangıç', bgColor: '#10b981', description: 'Süreci başlatır', taskType: 'start' },
-    { type: 'io', label: 'Form Görevi', bgColor: '#3b82f6', description: 'Personele form atar', taskType: 'form' },
-    { type: 'decision', label: 'Onay Mekanizması', bgColor: '#f59e0b', description: 'Yönetici onayına sunar', taskType: 'approval' },
-    { type: 'task', label: 'İnceleme (Bilgi)', bgColor: '#8b5cf6', description: 'Sadece bilgilendirir', taskType: 'review' },
-    { type: 'io', label: 'Mail Bildirimi', bgColor: '#06b6d4', description: 'Otomatik e-posta atar', taskType: 'notify' },
-    { type: 'task', label: 'Onayla ve İmzala', bgColor: '#14b8a6', description: 'E-İmza ile Onay', taskType: 'review' },
-    { type: 'document', label: 'İmza Belgesi', bgColor: '#64748b', description: 'İmzalı Belge Çıktısı', taskType: 'document' },
-    { type: 'io', label: 'Scheduled Email', bgColor: '#8b5cf6', description: 'Zamanlanmış e-posta', taskType: 'notify' },
-    { type: 'task', label: 'PDF Üret', bgColor: '#475569', description: 'Sistemsel PDF Çıktısı', taskType: 'review' },
-    { type: 'io', label: 'Webhook', bgColor: '#334155', description: 'Dış API tetiklemesi', taskType: 'notify' },
-    { type: 'storage', label: 'Depo / Bekleme', bgColor: '#eab308', description: 'Bekleme / Depolama Noktası', taskType: 'storage' },
-    { type: 'decision', label: 'Sistem Kararı (Kural)', bgColor: '#ec4899', description: 'Kurallara göre otomatik yönlendirir', taskType: 'system_rule' },
-    { type: 'end', label: 'Bitiş (End)', bgColor: '#ef4444', description: 'Süreci tamamlar', taskType: 'end' },
+// Temel İş Akışı Elemanları
+const temelNodeTypes = [
+    { type: 'start', label: 'Başlangıç', bgColor: '#10b981', description: 'Süreci başlatır', taskType: 'start', iconLetter: '▶' },
+    { type: 'io', label: 'Form Görevi', bgColor: '#3b82f6', description: 'Personele form doldurma görevi atar', taskType: 'form', iconLetter: '📋' },
+    { type: 'decision', label: 'Onay Mekanizması', bgColor: '#f59e0b', description: 'Yönetici onayına sunar (Termin zorunluluğu destekler)', taskType: 'approval', iconLetter: '✓' },
+    { type: 'io', label: 'Süreç Takibi', bgColor: '#0284c7', description: 'Belirlenen gün sonra satışçıya "Siparişe döndü mü?" takibi başlatır', taskType: 'follow_up', iconLetter: '⏱' },
+    { type: 'task', label: 'İnceleme (Bilgi)', bgColor: '#8b5cf6', description: 'Sadece bilgilendirir', taskType: 'review', iconLetter: '👁' },
+    { type: 'decision', label: 'Sistem Kararı (Kural)', bgColor: '#ec4899', description: 'Kurallara göre otomatik yönlendirir', taskType: 'system_rule', iconLetter: '⚙' },
+    { type: 'storage', label: 'Depo / Bekleme', bgColor: '#eab308', description: 'Bekleme / Depolama Noktası', taskType: 'storage', iconLetter: '⏳' },
+    { type: 'end', label: 'Bitiş (End)', bgColor: '#ef4444', description: 'Süreci tamamlar', taskType: 'end', iconLetter: '■' },
 ];
+
+// Otomasyon ve Entegrasyon Araçları
+const entegrasyonNodeTypes = [
+    { type: 'io', label: 'Süreç Takibi', bgColor: '#0284c7', description: 'Belirli gün sonra anket / takip tetikler (Numune, sipariş vb.)', taskType: 'follow_up', iconLetter: '⏱' },
+    { type: 'document', label: 'Belge & Sertifika Üretici', bgColor: '#475569', description: 'Otomatik Analiz Sertifikası veya PDF üretir', taskType: 'document_gen', iconLetter: '📜' },
+    { type: 'io', label: 'SAP S/4HANA Aktarımı', bgColor: '#0369a1', description: 'SAP ile sipariş / malzeme entegrasyonu', taskType: 'sap_sync', iconLetter: '🔄' },
+    { type: 'io', label: 'Mail Bildirimi', bgColor: '#06b6d4', description: 'Otomatik e-posta atar', taskType: 'notify', iconLetter: '✉' },
+    { type: 'io', label: 'Webhook / Dış API', bgColor: '#334155', description: 'Dış sisteme HTTP API çağrısı yapar', taskType: 'notify', iconLetter: '🔗' },
+];
+
+const paletteSearch = ref('');
+const filteredTemelNodes = computed(() => {
+    if (!paletteSearch.value.trim()) return temelNodeTypes;
+    const q = paletteSearch.value.toLowerCase();
+    return temelNodeTypes.filter(n => n.label.toLowerCase().includes(q) || n.description.toLowerCase().includes(q));
+});
+
+const filteredEntegrasyonNodes = computed(() => {
+    if (!paletteSearch.value.trim()) return entegrasyonNodeTypes;
+    const q = paletteSearch.value.toLowerCase();
+    return entegrasyonNodeTypes.filter(n => n.label.toLowerCase().includes(q) || n.description.toLowerCase().includes(q));
+});
 
 const selectedNodeForSettings = ref(null);
 const settingsTab = ref('general');
@@ -259,18 +281,42 @@ const onDrop = (event) => {
         baseData.assignValue = 'manager_1';
         baseData.description = '';
         baseData.rejectEnabled = true;
+        baseData.requireFieldOnApprove = false;
+        baseData.requiredFieldName = '';
+        baseData.requiredFieldErrorMessage = '';
     }
 
     if (nodeData.taskType === 'form') {
         baseData.rejectEnabled = false;
-    }
-
-    // Sadece form düğümü için form seçimi
-    if (nodeData.taskType === 'form') {
         baseData.subFormId = '';
         baseData.assignType = 'starter';
         baseData.assignValue = '';
         baseData.description = '';
+    }
+
+    // Süreç Takibi Düğümü
+    if (nodeData.taskType === 'follow_up') {
+        baseData.followUpTitle = 'Numune Siparişe Döndü mü?';
+        baseData.followUpPrompt = 'Sevk edilen numune siparişe dönüştü mü? Lütfen sipariş numarasını veya dönmeme gerekçesini sisteme işleyiniz.';
+        baseData.subFormId = '';
+        baseData.followUpDays = 15;
+        baseData.followUpIntervalDays = 5;
+        baseData.followUpMaxReminders = 3;
+        baseData.assignType = 'starter';
+        baseData.assignValue = '';
+        baseData.followUpType = 'general_follow_up';
+    }
+
+    // Belge & Sertifika Üretici Düğümü
+    if (nodeData.taskType === 'document_gen') {
+        baseData.documentTitle = 'Analiz Sertifikası (CoA)';
+        baseData.documentType = 'certificate_of_analysis';
+    }
+
+    // SAP S/4HANA Aktarımı Düğümü
+    if (nodeData.taskType === 'sap_sync') {
+        baseData.sapObjectType = 'sales_order';
+        baseData.sapSimulation = true;
     }
 
     // Sadece bildirim düğümü için e-posta
@@ -433,24 +479,60 @@ const isRuleModalOpen = ref(false);
                     <button @click="leftPaletteTab = 'entegrasyonlar'" class="w-1/2 py-3 text-center border-b-2 text-xs tracking-wider transition-colors" :class="leftPaletteTab === 'entegrasyonlar' ? 'border-teal-500 font-semibold text-white' : 'border-transparent text-gray-400 hover:text-gray-300'">ENTEGRASYONLAR</button>
                 </div>
 
-                <div v-if="leftPaletteTab === 'temel'" class="flex-1 overflow-y-auto pb-4 custom-scrollbar">
-                    <div class="p-4">
-                        <div class="relative">
-                            <svg class="w-4 h-4 absolute left-3 top-2.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                            <input type="text" placeholder="Ara..." class="w-full bg-[#334155] border-none rounded text-sm text-white pl-9 pr-3 py-2 focus:ring-1 focus:ring-teal-500 placeholder-gray-400">
-                        </div>
+                <!-- Arama Kutusu (Tüm sekmeler için ortak) -->
+                <div class="p-3 border-b border-[#334155]/60 bg-[#0f172a]/50">
+                    <div class="relative">
+                        <svg class="w-4 h-4 absolute left-3 top-2.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                        <input 
+                            v-model="paletteSearch" 
+                            type="text" 
+                            placeholder="Eleman ara..." 
+                            class="w-full bg-[#334155] border-none rounded text-xs text-white pl-9 pr-3 py-2 focus:ring-1 focus:ring-teal-500 placeholder-gray-400"
+                        >
                     </div>
+                </div>
+
+                <!-- TEMEL SEKME -->
+                <div v-if="leftPaletteTab === 'temel'" class="flex-1 overflow-y-auto pb-4 custom-scrollbar">
                     <div 
-                        v-for="nt in nodeTypes" 
+                        v-for="nt in filteredTemelNodes" 
                         :key="nt.label"
-                        class="px-4 py-3 border-b border-[#334155] hover:bg-[#334155] cursor-grab flex items-center group transition-colors"
+                        class="px-4 py-2.5 border-b border-[#334155]/60 hover:bg-[#334155] cursor-grab flex items-center group transition-colors"
                         draggable="true"
                         @dragstart="onDragStart($event, nt)"
                     >
-                        <div class="w-7 h-7 rounded flex items-center justify-center mr-3 text-white shadow-sm" :style="{ backgroundColor: nt.bgColor }">
-                            <span class="text-xs font-bold">{{ nt.label.charAt(0) }}</span>
+                        <div class="w-7 h-7 rounded-lg flex items-center justify-center mr-3 text-white shadow-sm shrink-0" :style="{ backgroundColor: nt.bgColor }">
+                            <span class="text-xs font-bold">{{ nt.iconLetter }}</span>
                         </div>
-                        <span class="font-medium flex-1 text-sm text-gray-300 group-hover:text-white transition-colors">{{ nt.label }}</span>
+                        <div class="min-w-0 flex-1">
+                            <span class="font-medium text-xs text-gray-200 group-hover:text-white transition-colors block truncate">{{ nt.label }}</span>
+                            <span class="text-[10px] text-gray-400 block truncate">{{ nt.description }}</span>
+                        </div>
+                    </div>
+                    <div v-if="filteredTemelNodes.length === 0" class="p-4 text-center text-xs text-gray-500">
+                        Aramanızla eşleşen temel eleman bulunamadı.
+                    </div>
+                </div>
+
+                <!-- ENTEGRASYONLAR SEKME -->
+                <div v-else-if="leftPaletteTab === 'entegrasyonlar'" class="flex-1 overflow-y-auto pb-4 custom-scrollbar">
+                    <div 
+                        v-for="nt in filteredEntegrasyonNodes" 
+                        :key="nt.label"
+                        class="px-4 py-2.5 border-b border-[#334155]/60 hover:bg-[#334155] cursor-grab flex items-center group transition-colors"
+                        draggable="true"
+                        @dragstart="onDragStart($event, nt)"
+                    >
+                        <div class="w-7 h-7 rounded-lg flex items-center justify-center mr-3 text-white shadow-sm shrink-0" :style="{ backgroundColor: nt.bgColor }">
+                            <span class="text-xs font-bold">{{ nt.iconLetter }}</span>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <span class="font-medium text-xs text-gray-200 group-hover:text-white transition-colors block truncate">{{ nt.label }}</span>
+                            <span class="text-[10px] text-gray-400 block truncate">{{ nt.description }}</span>
+                        </div>
+                    </div>
+                    <div v-if="filteredEntegrasyonNodes.length === 0" class="p-4 text-center text-xs text-gray-500">
+                        Aramanızla eşleşen entegrasyon elemanı bulunamadı.
                     </div>
                 </div>
             </div>
@@ -495,7 +577,7 @@ const isRuleModalOpen = ref(false);
             <!-- SAĞ PANEL: Ayarlar Modal (Absolute Offcanvas) -->
             <div v-if="selectedNodeForSettings || selectedEdge" class="absolute top-0 right-0 w-80 h-full bg-[#1e293b] text-gray-200 shadow-2xl flex flex-col z-50 transform transition-transform border-l border-[#334155] rounded-l-lg mr-4">
                 <div class="p-4 bg-[#0f172a] flex justify-between items-center rounded-tl-lg">
-                    <span class="font-bold text-lg text-white tracking-wide">{{ selectedNodeForSettings ? selectedNodeForSettings.label || 'Düğüm Ayarları' : 'Bağlantı Ayarları' }}</span>
+                    <span class="font-bold text-lg text-white tracking-wide">{{ selectedNodeForSettings ? selectedNodeForSettings.data?.label || selectedNodeForSettings.data?.customName || selectedNodeForSettings.label || 'Düğüm Ayarları' : 'Bağlantı Ayarları' }}</span>
                     <button @click="selectedNodeForSettings = null; selectedEdge = null" class="text-gray-400 hover:text-white transition-colors">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
@@ -553,51 +635,62 @@ const isRuleModalOpen = ref(false);
                                 class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2 resize-y min-h-[80px]"
                             ></textarea>
                         </div>
-                        
-                        <!-- ========== FORM GÖREVİ AYARLARI ========== -->
-                        <div v-if="selectedNodeForSettings.data.taskType === 'form'" class="pt-2 border-t border-[#334155]">
-                            <label class="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider mt-2">Bağlı Form</label>
-                            <p class="text-[10px] text-gray-500 mb-2">Bu adımda doldurulacak formu seçin.</p>
-                            <select v-model="selectedNodeForSettings.data.subFormId" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2 mb-3">
-                                <option value="">-- Form Seçin --</option>
-                                <option v-for="f in forms" :key="f.id" :value="f.id">{{ f.name }}</option>
-                            </select>
-                            <label class="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Atanan Kişi</label>
-                            <select v-model="selectedNodeForSettings.data.assignType" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
-                                <option value="starter">Süreci Başlatan Kişi</option>
-                                <option value="user">Belirli Bir Kullanıcı</option>
-                                <option value="role">Belirli Bir Rol</option>
-                            </select>
 
-                            <div v-if="selectedNodeForSettings.data.assignType === 'user'" class="mt-3">
-                                <label class="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Kullanıcı</label>
-                                <select v-model="selectedNodeForSettings.data.assignValue" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
-                                    <option value="">-- Kullanıcı Seçin --</option>
-                                    <option v-for="user in users" :key="user.id" :value="user.id">{{ user.name }}</option>
+                        <!-- ========== FORM GÖREVİ AYARLARI ========== -->
+                        <div v-if="selectedNodeForSettings.data.taskType === 'form'" class="pt-2 border-t border-[#334155] space-y-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider mt-2">Bağlı Form</label>
+                                <p class="text-[10px] text-gray-500 mb-2">Bu adımda personele doldurtulacak formu seçin (/form-templates/create ile oluşturulur).</p>
+                                <select v-model="selectedNodeForSettings.data.subFormId" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
+                                    <option value="">-- Form Seçin --</option>
+                                    <option v-for="f in forms" :key="f.id" :value="f.id">{{ f.name }}</option>
                                 </select>
                             </div>
-                            <div v-else-if="selectedNodeForSettings.data.assignType === 'role'" class="mt-3">
-                                <label class="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Rol</label>
-                                <select v-model="selectedNodeForSettings.data.assignValue" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
-                                    <option value="">-- Rol Seçin --</option>
-                                    <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
+                            
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Atanan Kişi</label>
+                                <select v-model="selectedNodeForSettings.data.assignType" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
+                                    <option value="starter">Süreci Başlatan Kişi</option>
+                                    <option value="user">Belirli Bir Kullanıcı</option>
+                                    <option value="role">Belirli Bir Rol</option>
                                 </select>
+
+                                <div v-if="selectedNodeForSettings.data.assignType === 'user'" class="mt-2">
+                                    <label class="block text-[10px] text-gray-400 mb-1">Kullanıcı Seçin</label>
+                                    <select v-model="selectedNodeForSettings.data.assignValue" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
+                                        <option value="">-- Kullanıcı Seçin --</option>
+                                        <option v-for="user in users" :key="user.id" :value="user.id">{{ user.name }}</option>
+                                    </select>
+                                </div>
+                                <div v-else-if="selectedNodeForSettings.data.assignType === 'role'" class="mt-2">
+                                    <label class="block text-[10px] text-gray-400 mb-1">Rol Seçin</label>
+                                    <select v-model="selectedNodeForSettings.data.assignValue" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
+                                        <option value="">-- Rol Seçin --</option>
+                                        <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
+                                    </select>
+                                </div>
                             </div>
-                            <div v-if="selectedNodeForSettings.data.taskType === 'end'" class="pt-4 border-t border-[#334155]">
-                            <label class="block text-xs font-semibold text-red-400 mb-2 uppercase tracking-wider">Süreç Sonuç Durumu</label>
-                            <p class="text-[10px] text-gray-400 mb-3">Süreç bu düğüme ulaşıp sonlandığında veritabanına hangi durumla (status) kaydedileceğini seçin.</p>
-                            <select v-model="selectedNodeForSettings.data.processStatus" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-red-500 px-3 py-2">
-                                <option value="completed">Başarıyla Tamamlandı (Olumlu)</option>
-                                <option value="rejected">Reddedildi / İptal Edildi (Olumsuz)</option>
-                            </select>
-                        </div>
+
+                            <div class="pt-2 border-t border-[#334155]">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        v-model="selectedNodeForSettings.data.rejectEnabled"
+                                        type="checkbox"
+                                        class="rounded border-gray-500 bg-[#334155] text-red-500 focus:ring-red-500"
+                                    />
+                                    <span class="text-sm text-gray-200">Reddetme / İade seçeneği</span>
+                                </label>
+                                <p class="text-[10px] text-gray-500 mt-1">
+                                    Aktifken form dolduran personel talebi reddedebilir veya red çıkışından akış yönlendirilebilir.
+                                </p>
+                            </div>
                         </div>
 
                         <!-- ========== ONAY / İNCELEME AYARLARI ========== -->
-                        <div v-if="['approval', 'review'].includes(selectedNodeForSettings.data.taskType)">
+                        <div v-if="['approval', 'review'].includes(selectedNodeForSettings.data.taskType)" class="space-y-4">
                             <div class="pt-2 border-t border-[#334155]">
                                 <label class="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider mt-2">Onaylayan / Atanan Kişi</label>
-                                <p class="text-[10px] text-gray-500 mb-2">Bu adımı kimin işlemesi gerektiğini belirleyin.</p>
+                                <p class="text-[10px] text-gray-500 mb-2">Bu adımı kimin onaylayacağını veya inceleyeceğini belirleyin.</p>
                                 <select v-model="selectedNodeForSettings.data.assignType" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2 mb-3">
                                     <option value="starter">Süreci Başlatan Kişi</option>
                                     <option value="hierarchy">Hiyerarşik Yönetici</option>
@@ -635,7 +728,7 @@ const isRuleModalOpen = ref(false);
                                 </div>
                             </div>
 
-                            <div class="pt-3 border-t border-[#334155]">
+                            <div class="pt-2 border-t border-[#334155]">
                                 <label class="flex items-center gap-2 cursor-pointer">
                                     <input
                                         v-model="selectedNodeForSettings.data.rejectEnabled"
@@ -648,20 +741,208 @@ const isRuleModalOpen = ref(false);
                                     Aktifken atanan kişi reddedebilir. Red çıkışını hangi düğüme bağlarsanız süreç oradan devam eder.
                                 </p>
                             </div>
+
+                            <!-- Koşullu Onay Doğrulaması (Zorunlu Alan Doğrulaması) -->
+                            <div class="pt-3 border-t border-[#334155]">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        v-model="selectedNodeForSettings.data.requireFieldOnApprove"
+                                        type="checkbox"
+                                        class="rounded border-gray-500 bg-[#334155] text-amber-500 focus:ring-amber-500"
+                                    />
+                                    <span class="text-sm text-amber-300 font-semibold">Onaylarken Zorunlu Alan İste</span>
+                                </label>
+                                <p class="text-[10px] text-gray-400 mt-1">
+                                    Onay butonuna basıldığında formda/süreçte belirli bir alanın (Örn: termin_tarihi, fatura_no, teslim_tarihi) doldurulmuş olmasını zorunlu kılar.
+                                </p>
+
+                                <div v-if="selectedNodeForSettings.data.requireFieldOnApprove" class="mt-3 space-y-2 bg-[#0f172a]/50 p-3 rounded-lg border border-amber-500/30">
+                                    <div>
+                                        <label class="block text-[11px] font-bold text-gray-300 mb-1 uppercase tracking-wider">Zorunlu Alan Anahtarı</label>
+                                        <input 
+                                            v-model="selectedNodeForSettings.data.requiredFieldName" 
+                                            type="text" 
+                                            placeholder="Örn: termin_tarihi, fatura_no, teslim_tarihi" 
+                                            class="w-full bg-[#334155] border-none rounded text-xs text-white focus:ring-1 focus:ring-amber-500 px-3 py-2 font-mono"
+                                        >
+                                        <span class="text-[9px] text-gray-400">Form şablonundaki alanın değişken adı (field key)</span>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] font-bold text-gray-300 mb-1 uppercase tracking-wider">Özel Hata Mesajı</label>
+                                        <input 
+                                            v-model="selectedNodeForSettings.data.requiredFieldErrorMessage" 
+                                            type="text" 
+                                            placeholder="Örn: Numuneyi kabul ederken bir termin tarihi bildirmek zorunludur." 
+                                            class="w-full bg-[#334155] border-none rounded text-xs text-white focus:ring-1 focus:ring-amber-500 px-3 py-2"
+                                        >
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
-                        <div v-if="selectedNodeForSettings.data.taskType === 'form'" class="pt-3 border-t border-[#334155]">
-                            <label class="flex items-center gap-2 cursor-pointer">
-                                <input
-                                    v-model="selectedNodeForSettings.data.rejectEnabled"
-                                    type="checkbox"
-                                    class="rounded border-gray-500 bg-[#334155] text-red-500 focus:ring-red-500"
-                                />
-                                <span class="text-sm text-gray-200">Reddetme seçeneği</span>
-                            </label>
-                            <p class="text-[10px] text-gray-500 mt-1">
-                                Aktifken Red çıkışını bağladığınız düğüme geri dönülebilir.
+                        <!-- ========== SÜREÇ TAKİBİ AYARLARI ========== -->
+                        <div v-if="selectedNodeForSettings.data.taskType === 'follow_up'" class="pt-4 border-t border-[#334155] space-y-3">
+                            <div class="flex items-center gap-2">
+                                <span class="text-base">⏱</span>
+                                <h4 class="text-xs font-bold text-sky-400 uppercase tracking-wider">Süreç Takibi Ayarları</h4>
+                            </div>
+                            <p class="text-[10px] text-gray-400 leading-relaxed">
+                                Bu düğüm süreç bu adıma ulaştıktan sonra belirlenen gün kadar bekleyip sorumluya (satışçıya) otomatik takip görevi ve sorgulama e-postası oluşturur.
                             </p>
+
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-400 mb-1 uppercase tracking-wider">Takip / Anket Başlığı</label>
+                                <input 
+                                    v-model="selectedNodeForSettings.data.followUpTitle" 
+                                    type="text" 
+                                    placeholder="Örn: Numune Sipariş Takibi veya Dosya Kontrolü" 
+                                    class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-sky-500 px-3 py-2"
+                                >
+                            </div>
+
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-400 mb-1 uppercase tracking-wider">Soru / Açıklama Metni</label>
+                                <textarea 
+                                    v-model="selectedNodeForSettings.data.followUpPrompt" 
+                                    rows="3" 
+                                    placeholder="Örn: Numune siparişe dönüştü mü? Dönmediyse sebebini belirtiniz." 
+                                    class="w-full bg-[#334155] border-none rounded text-xs text-white focus:ring-1 focus:ring-sky-500 px-3 py-2"
+                                ></textarea>
+                            </div>
+
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-400 mb-1 uppercase tracking-wider">Bağlı Takip / Anket Formu (Opsiyonel)</label>
+                                <p class="text-[10px] text-gray-500 mb-1.5">/form-templates/create adresinden oluşturulan takip formunu bağlayabilirsiniz.</p>
+                                <select v-model="selectedNodeForSettings.data.subFormId" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-sky-500 px-3 py-2">
+                                    <option value="">-- Standart Sonuç Seçenekleri (Formsuz) --</option>
+                                    <option v-for="f in forms" :key="f.id" :value="f.id">{{ f.name }}</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-400 mb-1 uppercase tracking-wider">Kime Görev / Mail Atanacak?</label>
+                                <select v-model="selectedNodeForSettings.data.assignType" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-sky-500 px-3 py-2">
+                                    <option value="starter">Süreci Başlatan Kişi (Satış Yetkilisi / Talep Sahibi)</option>
+                                    <option value="user">Belirli Bir Kullanıcı</option>
+                                    <option value="role">Belirli Bir Rol</option>
+                                </select>
+
+                                <div v-if="selectedNodeForSettings.data.assignType === 'user'" class="mt-2">
+                                    <label class="block text-[10px] text-gray-400 mb-1">Kullanıcı Seçin</label>
+                                    <select v-model="selectedNodeForSettings.data.assignValue" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-sky-500 px-3 py-2">
+                                        <option value="">-- Kullanıcı Seçin --</option>
+                                        <option v-for="user in users" :key="user.id" :value="user.id">{{ user.name }}</option>
+                                    </select>
+                                </div>
+                                <div v-else-if="selectedNodeForSettings.data.assignType === 'role'" class="mt-2">
+                                    <label class="block text-[10px] text-gray-400 mb-1">Rol Seçin</label>
+                                    <select v-model="selectedNodeForSettings.data.assignValue" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-sky-500 px-3 py-2">
+                                        <option value="">-- Rol Seçin --</option>
+                                        <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-3 gap-2 pt-2 border-t border-[#334155]">
+                                <div>
+                                    <label class="block text-[10px] text-gray-400 mb-1">İlk Süre (Gün)</label>
+                                    <input 
+                                        v-model.number="selectedNodeForSettings.data.followUpDays" 
+                                        type="number" 
+                                        min="1" 
+                                        placeholder="Ayarlar" 
+                                        class="w-full bg-[#334155] border-none rounded text-xs text-white focus:ring-1 focus:ring-sky-500 px-2.5 py-1.5"
+                                    >
+                                    <span class="text-[9px] text-gray-500">Boşsa sistem ayarı</span>
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] text-gray-400 mb-1">Aralık (Gün)</label>
+                                    <input 
+                                        v-model.number="selectedNodeForSettings.data.followUpIntervalDays" 
+                                        type="number" 
+                                        min="1" 
+                                        placeholder="Ayarlar" 
+                                        class="w-full bg-[#334155] border-none rounded text-xs text-white focus:ring-1 focus:ring-sky-500 px-2.5 py-1.5"
+                                    >
+                                    <span class="text-[9px] text-gray-500">Hatırlatma aralığı</span>
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] text-gray-400 mb-1">Maks. Tekrar</label>
+                                    <input 
+                                        v-model.number="selectedNodeForSettings.data.followUpMaxReminders" 
+                                        type="number" 
+                                        min="1" 
+                                        placeholder="Ayarlar" 
+                                        class="w-full bg-[#334155] border-none rounded text-xs text-white focus:ring-1 focus:ring-sky-500 px-2.5 py-1.5"
+                                    >
+                                    <span class="text-[9px] text-gray-500">Maks. bildirim</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ========== BELGE & SERTİFİKA ÜRETİCİ AYARLARI ========== -->
+                        <div v-if="selectedNodeForSettings.data.taskType === 'document_gen'" class="pt-4 border-t border-[#334155] space-y-3">
+                            <div class="flex items-center gap-2">
+                                <span class="text-base">📜</span>
+                                <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Belge & Sertifika Üretici</h4>
+                            </div>
+                            <p class="text-[10px] text-gray-400 leading-relaxed">
+                                Süreç verilerini derleyerek otomatik PDF dokümanı oluşturur ve süreç detay sayfasına ekler.
+                            </p>
+
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-400 mb-1 uppercase tracking-wider">Belge Başlığı</label>
+                                <input 
+                                    v-model="selectedNodeForSettings.data.documentTitle" 
+                                    type="text" 
+                                    placeholder="Örn: Analiz Sertifikası (CoA) veya Teslim Tutanağı" 
+                                    class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2"
+                                >
+                            </div>
+
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-400 mb-1 uppercase tracking-wider">Belge Şablon Türü</label>
+                                <select v-model="selectedNodeForSettings.data.documentType" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
+                                    <option value="certificate_of_analysis">Analiz Sertifikası (CoA - Certificate of Analysis)</option>
+                                    <option value="delivery_report">Teslim & Tesellüm Tutanağı</option>
+                                    <option value="form_summary">Süreç & Form Verileri Özeti</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- ========== SAP S/4HANA ENTEGRASYON AYARLARI ========== -->
+                        <div v-if="selectedNodeForSettings.data.taskType === 'sap_sync'" class="pt-4 border-t border-[#334155] space-y-3">
+                            <div class="flex items-center gap-2">
+                                <span class="text-base">🔄</span>
+                                <h4 class="text-xs font-bold text-sky-400 uppercase tracking-wider">SAP S/4HANA Aktarımı</h4>
+                            </div>
+                            <p class="text-[10px] text-gray-400 leading-relaxed">
+                                Süreç bu adıma geldiğinde SAP S/4HANA servisine veri aktarımı tetikler.
+                            </p>
+
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-400 mb-1 uppercase tracking-wider">SAP Nesne Türü</label>
+                                <select v-model="selectedNodeForSettings.data.sapObjectType" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-sky-500 px-3 py-2">
+                                    <option value="sales_order">Müşteri Siparişi (VA01 - Sales Order)</option>
+                                    <option value="purchase_requisition">Satınalma Talebi (ME51N - Purchase Requisition)</option>
+                                    <option value="goods_movement">Malzeme Hareketi (MIGO - Goods Movement)</option>
+                                    <option value="custom">Özel BAPI / OData Servisi</option>
+                                </select>
+                            </div>
+
+                            <div class="pt-2">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        v-model="selectedNodeForSettings.data.sapSimulation"
+                                        type="checkbox"
+                                        class="rounded border-gray-500 bg-[#334155] text-sky-500 focus:ring-sky-500"
+                                    />
+                                    <span class="text-sm text-gray-200">Simülasyon / Test Modu</span>
+                                </label>
+                                <p class="text-[10px] text-gray-400 mt-1">
+                                    İşaretliyken SAP sunucusuna gerçek çağrı atmak yerine simüle test yanıtı kaydeder.
+                                </p>
+                            </div>
                         </div>
 
                         <!-- ========== MAİL BİLDİRİMİ AYARLARI ========== -->
@@ -688,7 +969,7 @@ const isRuleModalOpen = ref(false);
                             <!-- Konu (Subject) -->
                             <div>
                                 <label class="block text-[11px] font-bold text-gray-400 mb-1 uppercase tracking-widest">Mail Konusu</label>
-                                <input v-model="selectedNodeForSettings.data.notifySubject" type="text" placeholder="Örn: SAP EWM Süreci Tamamlandı" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
+                                <input v-model="selectedNodeForSettings.data.notifySubject" type="text" placeholder="Örn: Süreç Bilgilendirmesi" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
                             </div>
 
                             <!-- Mesaj (Body) -->
@@ -698,6 +979,15 @@ const isRuleModalOpen = ref(false);
                             </div>
                         </div>
 
+                        <!-- ========== BİTİŞ DÜĞÜMÜ AYARLARI ========== -->
+                        <div v-if="selectedNodeForSettings.data.taskType === 'end'" class="pt-4 border-t border-[#334155]">
+                            <label class="block text-xs font-semibold text-red-400 mb-2 uppercase tracking-wider">Süreç Sonuç Durumu</label>
+                            <p class="text-[10px] text-gray-400 mb-3">Süreç bu düğüme ulaşıp sonlandığında veritabanına hangi durumla (status) kaydedileceğini seçin.</p>
+                            <select v-model="selectedNodeForSettings.data.processStatus" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-red-500 px-3 py-2">
+                                <option value="completed">Başarıyla Tamamlandı (Olumlu)</option>
+                                <option value="rejected">Reddedildi / İptal Edildi (Olumsuz)</option>
+                            </select>
+                        </div>
                         </div>
 
                         <!-- ========== GELİŞMİŞ: ZAMANLAMA ========== -->

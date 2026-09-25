@@ -27,6 +27,8 @@ class Workflow extends Model
         'status',
         'version',
         'created_by',
+        'follow_up_enabled',
+        'is_sample_workflow',
     ];
 
     protected $casts = [
@@ -38,6 +40,8 @@ class Workflow extends Model
         'category' => 'array',
         'valid_from' => 'date',
         'valid_until' => 'date',
+        'follow_up_enabled' => 'boolean',
+        'is_sample_workflow' => 'boolean',
     ];
 
     public function formTemplate(): BelongsTo

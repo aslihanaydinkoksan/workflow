@@ -17,7 +17,7 @@ const formsList = inject('formsList', ref([]));
 
 const getSubtitleInfo = (data) => {
     if (data.taskType === 'start') return { icon: '▶', text: 'Süreci Başlatır' };
-    if (data.taskType === 'end') return { icon: '■', text: 'Süreci Sonlandırır' };
+    if (data.taskType === 'end') return { icon: '■', text: data.processStatus === 'rejected' ? 'Reddedildi / İptal' : 'Başarıyla Tamamlar' };
     
     if (data.taskType === 'form') {
         // Form görevi: bağlı form adını göster
@@ -26,6 +26,31 @@ const getSubtitleInfo = (data) => {
             return { icon: '📋', text: foundForm ? foundForm.name : 'Form Seçili' };
         }
         return { icon: '📋', text: 'Form Seçilmedi' };
+    }
+
+    if (data.taskType === 'follow_up') {
+        let text = data.followUpTitle || 'Zamanlanmış Takip';
+        if (data.subFormId) {
+            const foundForm = formsList.value?.find(f => f.id == data.subFormId);
+            if (foundForm) text += ` · ${foundForm.name}`;
+        } else if (data.followUpDays) {
+            text += ` (${data.followUpDays} gün sonra)`;
+        }
+        return { icon: '⏱', text };
+    }
+
+    if (data.taskType === 'document_gen' || data.taskType === 'document') {
+        return { icon: '📜', text: data.documentTitle || (data.documentType === 'certificate_of_analysis' ? 'Analiz Sertifikası (CoA)' : 'PDF Üretici') };
+    }
+
+    if (data.taskType === 'sap_sync') {
+        const typeLabels = {
+            sales_order: 'SAP Sipariş (VA01)',
+            purchase_requisition: 'SAP Satınalma (ME51N)',
+            goods_movement: 'SAP Malzeme (MIGO)',
+            custom: 'SAP BAPI/OData'
+        };
+        return { icon: '🔄', text: typeLabels[data.sapObjectType] || 'SAP S/4HANA Aktarımı' };
     }
     
     if (data.taskType === 'approval' || data.taskType === 'review') {
@@ -45,6 +70,8 @@ const getSubtitleInfo = (data) => {
         } else if (data.assignType === 'role') {
             icon = '🔑';
             text = 'Belirli Rol';
+        } else if (data.assignType === 'starter') {
+            text = 'Süreci Başlatan';
         } else if (data.assignType) {
             text = 'Atanmış';
         }
@@ -53,19 +80,23 @@ const getSubtitleInfo = (data) => {
             text += ' · ↩ Red';
         }
 
+        if (data.requireFieldOnApprove) {
+            text += ' · 🔒 Zorunlu Alan';
+        }
+
         return { icon, text };
     }
     
     if (data.taskType === 'notify') {
-        return { icon: '✉', text: data.notifyEmail || 'E-posta Ayarlanmadı' };
-    }
-    
-    if (data.taskType === 'document') {
-        return { icon: '📄', text: 'Belge Çıktısı' };
+        return { icon: '✉', text: data.notifyEmail || (data.notifyTo === 'initiator' ? 'Başlatan Kişiye' : 'E-posta Bildirimi') };
     }
     
     if (data.taskType === 'storage') {
         return { icon: '⏳', text: 'Bekleme Noktası' };
+    }
+
+    if (data.taskType === 'system_rule') {
+        return { icon: '⚙', text: 'Otomatik Kural Kararı' };
     }
     
     return { icon: 'ℹ', text: 'Yapılandırılmamış' };

@@ -42,62 +42,46 @@ class NotificationService
         );
     }
     public function delegationAssigned(\App\Models\Delegation $delegation): void
-{
-    // Try-catch bloğu tüm işlemleri sarar, fırlatılan ve yutulan her hatayı yakalar.
-    try {
-        // GEÇİCİ KONTROL 2: Metoda gerçekten girildi mi?
-        // Buradaki dd() çalışırsa, Controller servisi başarıyla çağırmış demektir.
-        // dd("1. Vekalet bildirim sürecine girildi. ID: " . $delegation->id);
+    {
+        try {
+            $delegation->loadMissing(['delegator', 'delegatee']);
 
-        $delegation->loadMissing(['delegator', 'delegatee']);
-        
-        $delegator = $delegation->delegator;
-        $delegatee = $delegation->delegatee;
+            $delegator = $delegation->delegator;
+            $delegatee = $delegation->delegatee;
 
-        if (! $delegator || ! $delegatee) {
-            // Log::error yerine dd ile işlemi kesip hangi verinin null geldiğine bakalım.
-            dd([
-                'mesaj' => '2. HATA: Delegator veya Delegatee boş geldi!',
-                'delegator_id' => $delegation->delegator_id,
-                'delegatee_id' => $delegation->delegatee_id,
-                'bulunan_delegator' => $delegator,
-                'bulunan_delegatee' => $delegatee
+            if (! $delegator || ! $delegatee) {
+                Log::warning('Vekalet bildiriminde kullanıcı eksik:', [
+                    'delegation_id' => $delegation->id,
+                    'delegator_id'  => $delegation->delegator_id,
+                    'delegatee_id'  => $delegation->delegatee_id,
+                ]);
+                return;
+            }
+
+            $startDate = \Carbon\Carbon::parse($delegation->start_date)->format('d.m.Y');
+            $endDate = \Carbon\Carbon::parse($delegation->end_date)->format('d.m.Y');
+
+            $this->send(
+                user: $delegatee,
+                type: 'delegation_assigned',
+                title: 'Yeni Vekalet Ataması',
+                body: "{$delegator->name} tarafından {$startDate} ile {$endDate} tarihleri arasında vekil olarak atandınız.",
+                task: null,
+                data: [
+                    'action_url'     => route('tasks.index'),
+                    'delegator_name' => $delegator->name,
+                    'start_date'     => $startDate,
+                    'end_date'       => $endDate,
+                ]
+            );
+        } catch (\Throwable $e) {
+            Log::error('Vekalet bildirim gönderim hatası: ' . $e->getMessage(), [
+                'delegation_id' => $delegation->id,
+                'file'          => $e->getFile(),
+                'line'          => $e->getLine(),
             ]);
-            return;
         }
-
-        // GEÇİCİ KONTROL 3: İlişkiler yüklendiyse send() aşamasına geldik mi?
-        // dd("3. İlişkiler bulundu, send() metodu çağrılıyor...", $delegator->name, $delegatee->name);
-
-        $startDate = \Carbon\Carbon::parse($delegation->start_date)->format('d.m.Y');
-        $endDate = \Carbon\Carbon::parse($delegation->end_date)->format('d.m.Y');
-
-        $this->send(
-            user: $delegatee,
-            type: 'delegation_assigned',
-            title: 'Yeni Vekalet Ataması',
-            body: "{$delegator->name} tarafından {$startDate} ile {$endDate} tarihleri arasında vekil olarak atandınız.",
-            task: null,
-            data: [
-                'delegator_name' => $delegator->name,
-                'start_date'     => $startDate,
-                'end_date'       => $endDate,
-            ]
-        );
-        
-        // GEÇİCİ KONTROL 4: send() metodu hatasız tamamlandı mı?
-        // dd("4. İşlem tamamen bitti, send() metodu başarıyla çalıştı.");
-
-    } catch (\Throwable $e) {
-        // GEÇİCİ KONTROL 5: Sessizce yutulan bir hata (Exception, TypeError vs.) varsa burada yakalanacak ve ekrana basılacak.
-        dd([
-            'Hata Yakalandı!' => $e->getMessage(),
-            'Dosya'           => $e->getFile(),
-            'Satır'           => $e->getLine(),
-            'Trace'           => $e->getTraceAsString()
-        ]);
     }
-}
 
     public function taskRejected(ProcessInstance $instance, Task $task, User $rejectedBy, ?string $comment = null): void
     {

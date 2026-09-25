@@ -88,6 +88,7 @@
                 @php
                     $desc =
                         $mailData['description'] ??
+                        $mailData['notifyMessage'] ??
                         'Sürecinizle ilgili sistem kuralları gereği yeni bir karar alınmıştır.';
                     // "Sistem Karar Notu:" metnini bularak HTML <strong> etiketi ile değiştiriyoruz
                     $desc = str_replace('Sistem Karar Notu:', '<strong>Sistem Karar Notu:</strong>', e($desc));
@@ -99,7 +100,7 @@
 
             <center>
                 <!-- Güvenli URL Üretimi -->
-                <a href="{{ rtrim(config('app.url'), '/') }}/processes/tracker/{{ $instance->id }}"
+                <a href="{{ route('processes.tracker', $instance->id) }}"
                     class="action-button">Süreci Görüntüle</a>
             </center>
         </div>

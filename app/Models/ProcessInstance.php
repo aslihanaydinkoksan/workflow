@@ -35,4 +35,14 @@ class ProcessInstance extends Model
     {
         return $this->belongsTo(User::class, 'started_by');
     }
+
+    public function followUps()
+    {
+        return $this->hasMany(FollowUp::class);
+    }
+
+    public function latestFollowUp()
+    {
+        return $this->hasOne(FollowUp::class)->latestOfMany();
+    }
 }

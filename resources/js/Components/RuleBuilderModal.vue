@@ -47,17 +47,22 @@ const fetchExistingRules = async () => {
     }
 };
 
+const modalToast = ref(null);
+const showModalToast = (message, type = 'success') => {
+    modalToast.value = { message, type };
+    setTimeout(() => { modalToast.value = null; }, 4000);
+};
+
 watch(() => props.show, async (newVal) => {
     if (newVal && props.workflowId) {
         resetForm();
         fetchExistingRules();
         try {
             const response = await axios.get(route('admin.rules.fields', { workflow: props.workflowId }));
-            // Gelen alanların { value, label, type, options } formatında olduğunu varsayıyoruz
             availableFields.value = response.data.fields || [];
             if (ruleForm.value.conditions.length === 0) addCondition();
         } catch (error) {
-            alert("Dinamik alanlar yüklenirken bir hata oluştu.");
+            showModalToast("Dinamik alanlar yüklenirken bir hata oluştu.", "error");
         }
     }
 });
@@ -160,15 +165,16 @@ const deleteRule = async (ruleId) => {
     if (!confirm('Bu kuralı silmek istediğinize emin misiniz?')) return;
     try {
         await axios.delete(route('admin.rules.destroy', { rule: ruleId }));
-        await fetchExistingRules(); // Silince listeyi yenile
+        showModalToast("Kural başarıyla silindi.", "success");
+        await fetchExistingRules();
     } catch (error) {
-        alert("Kural silinemedi.");
+        showModalToast("Kural silinemedi.", "error");
     }
 };
 
 const saveRule = async () => {
     if (!ruleForm.value.target_node_id) {
-        alert("Lütfen kural sağlanırsa akışın yönlendirileceği hedef düğümü seçin.");
+        showModalToast("Lütfen kural sağlanırsa akışın yönlendirileceği hedef düğümü seçin.", "error");
         return;
     }
 
@@ -201,16 +207,16 @@ const saveRule = async () => {
         if (editingRuleId.value) {
             // Güncelleme Modu (PUT)
             await axios.put(route('admin.rules.update', { rule: editingRuleId.value }), payload);
-            alert("Kural başarıyla güncellendi!");
+            showModalToast("Kural başarıyla güncellendi!", "success");
         } else {
             // Yeni Ekleme Modu (POST)
             await axios.post(route('admin.rules.store'), payload);
-            alert("Kural başarıyla eklendi!");
+            showModalToast("Kural başarıyla eklendi!", "success");
         }
         resetForm();
         await fetchExistingRules();
     } catch (error) {
-        alert("Kural kaydedilemedi: " + (error.response?.data?.message || error.message));
+        showModalToast("Kural kaydedilemedi: " + (error.response?.data?.message || error.message), "error");
     } finally {
         isSaving.value = false;
     }
@@ -240,6 +246,16 @@ const saveRule = async () => {
                         </path>
                     </svg>
                 </button>
+            </div>
+
+            <!-- Modal Toast Bildirimi -->
+            <div v-if="modalToast" class="mb-6 p-4 rounded-2xl text-sm font-semibold flex items-center justify-between transition-all backdrop-blur-sm"
+                :class="modalToast.type === 'error' ? 'bg-red-500/25 border border-red-500/50 text-red-200' : 'bg-emerald-500/25 border border-emerald-500/50 text-emerald-200'">
+                <div class="flex items-center gap-3">
+                    <span class="text-lg">{{ modalToast.type === 'error' ? '⚠️' : '✅' }}</span>
+                    <span>{{ modalToast.message }}</span>
+                </div>
+                <button type="button" @click="modalToast = null" class="text-white/60 hover:text-white text-lg font-bold ml-4">&times;</button>
             </div>
 
             <!-- HAZIR ŞABLONLAR (PRESETS) -->

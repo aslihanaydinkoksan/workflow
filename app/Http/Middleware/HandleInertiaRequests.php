@@ -70,6 +70,14 @@ class HandleInertiaRequests extends Middleware
             'pending_tasks_count' => fn() => $user
                 ? TaskVisibility::queryForUser($user)->where('status', 'pending')->count()
                 : 0,
+            'pending_follow_ups_count' => fn() => $user
+                ? ($user->hasRole('Admin') || $user->hasRole('superadmin')
+                    ? \App\Models\FollowUp::where('status', 'pending')->count()
+                    : \App\Models\FollowUp::where('assigned_to', $user->id)->where('status', 'pending')->count())
+                : 0,
+            'my_running_processes_count' => fn() => $user
+                ? \App\Models\ProcessInstance::where('started_by', $user->id)->where('status', 'running')->count()
+                : 0,
             'unread_notifications_count' => fn() => $user
                 ? UserNotification::query()
                 ->where('user_id', $user->id)

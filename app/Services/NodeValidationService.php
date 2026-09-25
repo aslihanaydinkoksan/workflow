@@ -29,7 +29,10 @@ class NodeValidationService
 
         // JSON formatındaki şemayı Laravel Validation kurallarına dönüştürüyoruz
         foreach ($schema as $fieldDef) {
-            $field = $fieldDef['field'];
+            $field = $fieldDef['field'] ?? $fieldDef['name'] ?? null;
+            if (!$field) {
+                continue;
+            }
             $type = $fieldDef['type'] ?? 'text';
             $isRequired = $fieldDef['required'] ?? false;
 

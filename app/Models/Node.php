@@ -27,7 +27,6 @@ class Node extends Model
     /**
      * @var array<int, string>
      */
-    protected $guarded = ['id', 'created_at', 'updated_at'];
     protected $fillable = [
         'tree_type_id',
         'user_id',

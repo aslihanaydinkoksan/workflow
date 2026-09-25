@@ -11,6 +11,12 @@ class TaskVisibility
     public static function queryForUser(User $user): Builder
     {
         $user->loadMissing('roles');
+
+        // Admin veya Superadmin tüm görevleri görebilir, test edebilir ve onaylayabilir
+        if ($user->hasRole('Admin') || $user->hasRole('superadmin')) {
+            return Task::query();
+        }
+
         $roleIds = $user->roles->pluck('id')->map(fn ($id) => (int) $id)->all();
         $roleNames = $user->roles->pluck('name')->all();
 

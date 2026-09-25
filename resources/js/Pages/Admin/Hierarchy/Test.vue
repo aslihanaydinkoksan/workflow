@@ -15,9 +15,22 @@ const props = defineProps({
     directorates: { type: Array, default: () => [] }
 });
 
+// --- Toast Bildirim Sistemi ---
+const toasts = ref([]);
+const showToast = (type, message, title = '') => {
+    const id = Date.now() + Math.random();
+    toasts.value.push({ id, type, title, message });
+    setTimeout(() => {
+        toasts.value = toasts.value.filter(t => t.id !== id);
+    }, 4000);
+};
+const removeToast = (id) => {
+    toasts.value = toasts.value.filter(t => t.id !== id);
+};
+
 // --- Ağaç Tipi Değiştirme (Üst Filtre) ---
 const changeTreeType = (e) => {
-    router.get(route('admin.hierarchy.test'), { type_id: e.target.value }, { preserveState: true });
+    router.get(route('admin.hierarchy.index'), { type_id: e.target.value }, { preserveState: true });
 };
 
 // --- Sürükle Bırak (Drag & Drop) ---
@@ -30,9 +43,10 @@ const handleDrop = async (e, newParentId) => {
 
     try {
         await axios.patch(route('admin.hierarchy.nodes.move', { node: draggedNodeId.value }), { new_parent_id: newParentId }); 
+        showToast('success', 'Düğüm başarıyla taşındı.', 'Taşındı');
         router.reload({ only: ['nodes'] });
     } catch (err) {
-        alert("Taşıma başarısız oldu.");
+        showToast('error', err.response?.data?.message || 'Taşıma başarısız oldu.', 'Hata');
     } finally {
         draggedNodeId.value = null;
     }
@@ -60,21 +74,32 @@ const selectedSchema = computed(() => {
     return targetType?.schema || [];
 });
 
-// GÖREV 2: Hangi tiplerin seçili olduğunu bul (Dinamik UI için - GÜVENLİ KONTROL)
+const getFieldKey = (field) => field.field || field.name || '';
+const getFieldLabel = (field) => field.label || formatLabel(field.field || field.name || '');
+
+// TreeType bazlı tip kontrolü (hem key hem display_name destekli)
 const isPersonel = computed(() => {
     const t = props.treeTypes.find(x => x.id === form.value.tree_type_id);
-    return t && (t.display_name === 'Personel' || t.name === 'Personel');
+    if (!t) return false;
+    const k = (t.key || '').toLowerCase();
+    const d = (t.display_name || '').toLowerCase();
+    return k.includes('personel') || d.includes('personel');
 });
 
 const isDepartment = computed(() => {
     const t = props.treeTypes.find(x => x.id === form.value.tree_type_id);
-    // Soru işaretleri (?.), eğer name veya display_name null ise çökmesini engeller
-    return t && (t.display_name?.includes('Departman') || t.name?.includes('Departman'));
+    if (!t) return false;
+    const k = (t.key || '').toLowerCase();
+    const d = (t.display_name || '').toLowerCase();
+    return k.includes('departman') || d.includes('departman') || k.includes('bolum') || d.includes('bölüm');
 });
 
 const isDirectorate = computed(() => {
     const t = props.treeTypes.find(x => x.id === form.value.tree_type_id);
-    return t && (t.display_name === 'Direktörlük' || t.name === 'Direktörlük');
+    if (!t) return false;
+    const k = (t.key || '').toLowerCase();
+    const d = (t.display_name || '').toLowerCase();
+    return k.includes('direktor') || d.includes('direktör');
 });
 
 // Dropdown seçimi yapıldığında bu değişkende tutulacak ve Watcher ile dağıtılacak
@@ -115,9 +140,11 @@ watch(() => form.value.tree_type_id, (newTypeId, oldTypeId) => {
     if (modalAction.value === 'create') {
         const newMeta = {};
         selectedSchema.value.forEach(field => {
-            if (field.type === 'multiselect') newMeta[field.field] = [];
-            else if (field.type === 'boolean') newMeta[field.field] = false;
-            else newMeta[field.field] = '';
+            const key = getFieldKey(field);
+            if (!key) return;
+            if (field.type === 'multiselect') newMeta[key] = [];
+            else if (field.type === 'boolean') newMeta[key] = false;
+            else newMeta[key] = '';
         });
         
         // Departman/Direktörlük seçilmişse metadatanın içinde kalması için
@@ -167,9 +194,10 @@ const submitModal = async () => {
         await axios[method](url, form.value);
         
         isModalOpen.value = false;
+        showToast('success', modalAction.value === 'create' ? 'Düğüm başarıyla oluşturuldu.' : 'Düğüm başarıyla güncellendi.', 'Başarılı');
         router.reload({ only: ['nodes', 'subtypes'] });
     } catch (error) {
-        alert(error.response?.data?.message || 'Eksik veya hatalı bilgi girdiniz. Lütfen alanları kontrol edin.');
+        showToast('error', error.response?.data?.message || 'Eksik veya hatalı bilgi girdiniz. Lütfen alanları kontrol edin.', 'Hata');
     } finally {
         isProcessing.value = false;
     }
@@ -179,10 +207,10 @@ const deleteNode = async (id) => {
     if (!confirm("Bu düğümü ve tüm alt düğümlerini silmek istediğinize emin misiniz?")) return;
     try {
         await axios.delete(route('admin.hierarchy.nodes.destroy', { node: id }));
+        showToast('success', 'Düğüm ve tüm alt düğümleri silindi.', 'Silindi');
         router.reload({ only: ['nodes'] });
     } catch (err) {
-        console.error("Silme Hatası:", err);
-        alert("Silme başarısız.");
+        showToast('error', err.response?.data?.message || 'Silme başarısız.', 'Hata');
     }
 };
 
@@ -209,12 +237,44 @@ const formatLabel = (str) => {
     <Head title="Organizasyon Şeması" />
 
     <AuthenticatedLayout>
+        <!-- TOAST BİLDİRİMLERİ -->
+        <div class="fixed top-5 right-5 z-50 flex flex-col gap-2 max-w-sm pointer-events-none">
+            <TransitionGroup 
+                enter-active-class="transform ease-out duration-300 transition" 
+                enter-from-class="translate-y-2 opacity-0 sm:translate-y-0 sm:translate-x-4" 
+                enter-to-class="translate-y-0 opacity-100 sm:translate-x-0" 
+                leave-active-class="transition ease-in duration-200" 
+                leave-from-class="opacity-100" 
+                leave-to-class="opacity-0">
+                <div v-for="toast in toasts" :key="toast.id" 
+                     class="pointer-events-auto flex items-start gap-3 p-4 rounded-xl shadow-lg border backdrop-blur-sm transition-all"
+                     :class="[
+                         toast.type === 'success' ? 'bg-white/95 border-emerald-200 text-emerald-900 shadow-emerald-500/10' : '',
+                         toast.type === 'error' ? 'bg-white/95 border-rose-200 text-rose-900 shadow-rose-500/10' : '',
+                         toast.type === 'info' ? 'bg-white/95 border-indigo-200 text-indigo-900 shadow-indigo-500/10' : '',
+                     ]">
+                    <div class="flex-shrink-0 mt-0.5">
+                        <svg v-if="toast.type === 'success'" class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <svg v-else-if="toast.type === 'error'" class="w-5 h-5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <svg v-else class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </div>
+                    <div class="flex-1 text-sm">
+                        <p v-if="toast.title" class="font-bold leading-tight mb-0.5">{{ toast.title }}</p>
+                        <p class="text-xs leading-relaxed opacity-90">{{ toast.message }}</p>
+                    </div>
+                    <button @click="removeToast(toast.id)" class="text-gray-400 hover:text-gray-600 transition -mr-1 -mt-1 p-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
+            </TransitionGroup>
+        </div>
+
         <template #header>
             <div class="flex justify-between items-center">
                 <h2 class="font-semibold text-xl text-gray-800 leading-tight">Organizasyon Şeması Yönetimi</h2>
                 <div class="flex gap-3 items-center">
-                    <select @change="changeTreeType" class="rounded-lg border-gray-300 text-sm font-semibold shadow-sm focus:ring-indigo-500">
-                        <option v-for="t in treeTypes" :key="t.id" :value="t.id" :selected="treeType?.id === t.id">
+                    <select :value="treeType?.id" @change="changeTreeType" class="rounded-lg border-gray-300 text-sm font-semibold shadow-sm focus:ring-indigo-500">
+                        <option v-for="t in treeTypes" :key="t.id" :value="t.id">
                             {{ t.display_name }}
                         </option>
                     </select>
@@ -360,32 +420,34 @@ const formatLabel = (str) => {
                         <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Dinamik Özellikler (Metadata)</h4>
                         
                         <div class="space-y-4">
-                            <div v-for="field in selectedSchema" :key="field.field">
-                                <label class="block text-xs font-semibold text-gray-700 mb-1 capitalize">
-                                    {{ formatLabel(field.field) }} <span v-if="field.required" class="text-red-500">*</span>
+                            <div v-for="field in selectedSchema" :key="getFieldKey(field)">
+                                <label class="block text-xs font-semibold text-gray-700 mb-1">
+                                    {{ getFieldLabel(field) }}
+                                    <span v-if="field.unit" class="text-indigo-600 font-normal text-[11px]">({{ field.unit }})</span>
+                                    <span v-if="field.required" class="text-red-500">*</span>
                                 </label>
                                 
-                                <select v-if="field.type === 'boolean'" v-model="form.metadata[field.field]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
+                                <select v-if="field.type === 'boolean'" v-model="form.metadata[getFieldKey(field)]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
                                     <option :value="true">Evet</option>
                                     <option :value="false">Hayır</option>
                                 </select>
                                 
-                                <select v-else-if="field.type === 'select'" v-model="form.metadata[field.field]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
+                                <select v-else-if="field.type === 'select'" v-model="form.metadata[getFieldKey(field)]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
                                     <option value="" disabled>Seçiniz...</option>
                                     <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
                                 </select>
 
-                                <select v-else-if="field.type === 'multiselect'" multiple v-model="form.metadata[field.field]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm h-24 focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
+                                <select v-else-if="field.type === 'multiselect'" multiple v-model="form.metadata[getFieldKey(field)]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm h-24 focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
                                     <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
                                 </select>
                                 
-                                <input v-else-if="field.type === 'number'" type="number" step="any" v-model="form.metadata[field.field]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
+                                <input v-else-if="field.type === 'number'" type="number" step="any" v-model="form.metadata[getFieldKey(field)]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
                                 
-                                <input v-else-if="field.type === 'date'" type="date" v-model="form.metadata[field.field]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
+                                <input v-else-if="field.type === 'date'" type="date" v-model="form.metadata[getFieldKey(field)]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
                                 
-                                <textarea v-else-if="field.type === 'textarea'" rows="2" v-model="form.metadata[field.field]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50"></textarea>
+                                <textarea v-else-if="field.type === 'textarea'" rows="2" v-model="form.metadata[getFieldKey(field)]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50"></textarea>
                                 
-                                <input v-else type="text" v-model="form.metadata[field.field]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
+                                <input v-else type="text" v-model="form.metadata[getFieldKey(field)]" :required="field.required" class="w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
                             </div>
                         </div>
                     </div>

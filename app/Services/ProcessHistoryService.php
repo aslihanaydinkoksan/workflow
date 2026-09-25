@@ -35,7 +35,7 @@ class ProcessHistoryService
 
         $tasks = Task::query()
             ->where('process_instance_id', $instance->id)
-            ->where('status', '!=', 'pending')
+            ->whereIn('status', ['completed', 'rejected', 'revised'])
             ->whereNotNull('completed_at')
             ->with('assignedUser')
             ->orderBy('completed_at')
@@ -48,6 +48,8 @@ class ProcessHistoryService
                 ?? ($task->assigned_role ? $task->assigned_role.' (rol)' : 'Bilinmeyen');
 
             $history[] = [
+                'task_id' => $task->id,
+                'node_id' => $task->node_id,
                 'at' => $task->completed_at?->toIso8601String(),
                 'actor' => $actor,
                 'action' => $this->describeTaskAction($task),
@@ -108,7 +110,7 @@ class ProcessHistoryService
 
         $node = $nodes->firstWhere('id', $nodeId);
 
-        return $node['data']['label'] ?? $node['data']['customName'] ?? $node['label'] ?? $fallback;
+        return $node['data']['customName'] ?? $node['data']['label'] ?? $node['label'] ?? $fallback;
     }
 
     private function describeTaskAction(Task $task): string

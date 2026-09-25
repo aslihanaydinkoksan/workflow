@@ -133,11 +133,11 @@ class ProcessController extends Controller
 
         if ($pendingTask) {
             return redirect()->route('tasks.show', $pendingTask)
-                ->with('success', 'Süreç başlatıldı. Size atanan görevi tamamlayabilirsiniz.');
+                ->with('success', 'Süreç başlatıldı. İlk görev size atandığı için doğrudan görev ekranına yönlendirildiniz.');
         }
 
         return redirect()->route('processes.tracker', $instance->id)
-            ->with('success', 'Süreç başarıyla başlatıldı. Akış No: ' . $instance->id);
+            ->with('success', 'Süreç başarıyla başlatıldı ve ilgili onay/işlem birimine iletildi. (Talep No: #' . $instance->id . ')');
     }
 
     public function history()
@@ -163,10 +163,14 @@ class ProcessController extends Controller
             || $user->hasRole('Admin')
             || $user->hasRole('superadmin')
             || $user->can('view_admin_panel')
-            || ($user->can('processes.view_department') && $instance->starter->department_id === $user->department_id);
+            || ($user->can('processes.view_department') && $instance->starter?->department_id === $user->department_id)
+            || $instance->tasks()->where(function ($q) use ($user) {
+                $q->where('assigned_to', $user->id)
+                  ->orWhere('completed_by', $user->id);
+            })->exists();
 
         if (!$canView) {
-            abort(403);
+            abort(403, 'Bu süreci görüntüleme yetkiniz bulunmamaktadır.');
         }
 
         $instance->load('workflow.formTemplate', 'starter');
@@ -174,8 +178,19 @@ class ProcessController extends Controller
             $q->where('status', 'pending')->with('assignedUser');
         }]);
 
+        $myPendingTask = TaskVisibility::queryForUser($user)
+            ->where('process_instance_id', $instance->id)
+            ->where('status', 'pending')
+            ->first();
+
+        $followUp = \App\Models\FollowUp::where('process_instance_id', $instance->id)->latest()->first();
+        $expenseWorkflow = Workflow::where('name', 'like', '%Harcırah%')->orWhere('name', 'like', '%Masraf%')->first();
+
         return Inertia::render('Process/Tracker', [
             'instance' => $instance,
+            'myPendingTask' => $myPendingTask,
+            'followUp' => $followUp,
+            'expenseWorkflowId' => $expenseWorkflow?->id,
             'processHistory' => $historyService->buildForInstance($instance),
             'canCancelProcess' => $this->userCanCancelProcess($user)
                 && ! in_array($instance->status, ['completed', 'cancelled'], true),
@@ -225,5 +240,50 @@ class ProcessController extends Controller
             'instances' => $instances,
             'departmentName' => $user->department ? $user->department->name : 'Bölümünüz'
         ]);
+    }
+
+    public function exportCertificate(ProcessInstance $instance, \App\Services\CertificateGenerator $generator)
+    {
+        $user = Auth::user();
+        $isAdmin = $user->hasRole('Admin') || $user->hasRole('superadmin');
+
+        // Kullanıcı süreci başlatan kişi, admin veya süreçteki bir göreve atanmış kişi ise indirebilir
+        $isRelated = $isAdmin
+            || $instance->started_by === $user->id
+            || $instance->tasks()->where(function ($q) use ($user) {
+                $q->where('assigned_to', $user->id)
+                  ->orWhere('completed_by', $user->id);
+            })->exists();
+
+        if (!$isRelated) {
+            abort(403, 'Bu analiz sertifikasını görüntüleme yetkiniz bulunmamaktadır.');
+        }
+
+        $pdf = $generator->generate($instance);
+        $fileName = 'Analiz-Sertifikasi-PI-' . $instance->id . '.pdf';
+
+        return $pdf->download($fileName);
+    }
+
+    public function exportTravelOrder(ProcessInstance $instance, \App\Services\TravelOrderGenerator $generator)
+    {
+        $user = Auth::user();
+        $isAdmin = $user->hasRole('Admin') || $user->hasRole('superadmin');
+
+        $isRelated = $isAdmin
+            || $instance->started_by === $user->id
+            || $instance->tasks()->where(function ($q) use ($user) {
+                $q->where('assigned_to', $user->id)
+                  ->orWhere('completed_by', $user->id);
+            })->exists();
+
+        if (!$isRelated) {
+            abort(403, 'Bu dış görev belgesini görüntüleme yetkiniz bulunmamaktadır.');
+        }
+
+        $pdf = $generator->generate($instance);
+        $fileName = 'Dis-Gorev-Belgesi-PI-' . $instance->id . '.pdf';
+
+        return $pdf->download($fileName);
     }
 }

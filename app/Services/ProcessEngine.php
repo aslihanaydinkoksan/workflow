@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Log;
 use App\Models\UserNotification;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\ProcessNotificationMail;
+use App\Services\RuleAction;
 
 /**
  * Sınıf Sorumluluğu: Durum makinesi (State Machine) mimarisinde süreç akışlarını yönetir,
@@ -96,6 +97,9 @@ class ProcessEngine
             }
 
             $instance->update(['status' => $finalStatus]);
+            if ($finalStatus === 'completed') {
+                $this->handleProcessCompleted($instance);
+            }
             return;
         }
 
@@ -113,16 +117,17 @@ class ProcessEngine
 
             // Bildirimler
             if ($instance->started_by && $instance->starter && $instance->starter->email) {
-                // Bildirim Paneli (Çan İkonu) İçin Veri
                 UserNotification::create([
                     'user_id' => $instance->started_by,
                     'type'    => 'system',
                     'title'   => 'Süreç Otomatik Yönlendirildi / Reddedildi',
-                    'body'    => $reason, // Direkt kural motorundan gelen spesifik sebebi (Örn: SRC Yok) basıyoruz
-                    'message' => "Başlatmış olduğunuz #{$instance->id} numaralı süreç, sistem kuralları gereği şu karara istinaden yönlendirilmiştir:\n\n{$reason}",
-                    'link'    => route('processes.tracker', $instance->id),
-                    'data'    => json_encode(['url' => route('processes.tracker', $instance->id)]),
-                    'is_read' => false,
+                    'body'    => $reason,
+                    'data'    => [
+                        'url'                 => route('processes.tracker', $instance->id),
+                        'action_url'          => route('processes.tracker', $instance->id),
+                        'process_instance_id' => $instance->id,
+                        'reason'              => $reason,
+                    ],
                 ]);
 
                 // E-Posta İçin Veri
@@ -175,6 +180,9 @@ class ProcessEngine
                 $finalStatus = $nodeStatus ?: (in_array($instance->status, ['rejected', 'cancelled'], true) ? $instance->status : 'completed');
             }
             $instance->update(['status' => $finalStatus]);
+            if ($finalStatus === 'completed') {
+                $this->handleProcessCompleted($instance);
+            }
             return;
         }
 
@@ -189,14 +197,16 @@ class ProcessEngine
                 continue;
             }
 
-            // --- EVRENSEL RET YAKALAYICI (TÜRKÇE KARAKTER BUG'I İÇİN KESİN ÇÖZÜM) ---
+            // --- EVRENSEL RET YAKALAYICI (Kelime Sınırı Güvenliği: 'üretim' gibi kelimelerin 'ret' ile çakışmasını önler) ---
             $customName = $nextNode['data']['customName'] ?? '';
             $label = $nextNode['data']['label'] ?? '';
             $fullNodeName = mb_strtolower($customName . ' ' . $label, 'UTF-8');
-            // Türkçe karakterleri tamamen İngilizceye çevirerek hatayı yok ediyoruz
-            $fullNodeName = str_replace(['ı', 'i̇', 'ğ', 'ü', 'ş', 'ö', 'ç'], ['i', 'i', 'g', 'u', 's', 'o', 'c'], $fullNodeName);
+            $normalizedName = str_replace(['ı', 'i̇', 'ğ', 'ü', 'ş', 'ö', 'ç'], ['i', 'i', 'g', 'u', 's', 'o', 'c'], $fullNodeName);
 
-            if (str_contains($fullNodeName, 'iptal') || str_contains($fullNodeName, 'red') || str_contains($fullNodeName, 'ret') || $action === 'rejected' || ($ruleAction->type ?? '') === 'reject_and_route') {
+            $isRejectAction = ($action === 'rejected') || (($ruleAction->type ?? '') === 'reject_and_route');
+            $isRejectNode = preg_match('/\b(iptal|red|ret|reddedildi|reddedilme)\b/i', $normalizedName) === 1;
+
+            if ($isRejectAction || $isRejectNode) {
                 $data = $instance->data ?? [];
                 $data['_force_rejected'] = true;
                 $instance->data = $data;
@@ -232,10 +242,104 @@ class ProcessEngine
             $taskType = $nextNode['data']['taskType'] ?? 'approval';
 
             if ($taskType === 'notify') {
-                $email = $nextNode['data']['notifyEmail'] ?? null;
+                $nodeData = $nextNode['data'] ?? [];
+                $notifyTo = $nodeData['notifyTo'] ?? 'custom';
+                $email = null;
+                $targetUser = null;
+
+                if ($notifyTo === 'initiator') {
+                    $targetUser = $instance->starter;
+                    $email = $targetUser?->email;
+                } elseif ($notifyTo === 'department_manager') {
+                    $starter = $instance->starter;
+                    $targetUser = $starter?->manager ?? $starter?->department?->manager;
+                    $email = $targetUser?->email;
+                } elseif ($notifyTo === 'custom' || empty($notifyTo)) {
+                    $email = $nodeData['notifyEmail'] ?? null;
+                }
+
+                $subject = $nodeData['notifySubject'] ?? 'Süreç Bilgilendirmesi';
+                $messageBody = $nodeData['notifyMessage'] ?? $nodeData['description'] ?? "Sürecinizle (#{$instance->id}) ilgili sistem bildirimi.";
+
+                if ($targetUser) {
+                    UserNotification::create([
+                        'user_id' => $targetUser->id,
+                        'type'    => 'system',
+                        'title'   => $subject,
+                        'body'    => $messageBody,
+                        'data'    => [
+                            'url'                 => route('processes.tracker', $instance->id),
+                            'action_url'          => route('processes.tracker', $instance->id),
+                            'process_instance_id' => $instance->id,
+                        ],
+                    ]);
+                }
+
                 if (!empty($email)) {
-                    Mail::to($email)
-                        ->queue(new ProcessNotificationMail($instance, $nextNode['data'] ?? []));
+                    try {
+                        Mail::to($email)
+                            ->queue(new ProcessNotificationMail($instance, array_merge($nodeData, [
+                                'notifySubject' => $subject,
+                                'description'   => $messageBody,
+                            ])));
+                    } catch (\Throwable $e) {
+                        Log::error("E-posta gönderim hatası (Notify Node): " . $e->getMessage());
+                    }
+                }
+                $this->advance($instance, 'approve');
+            } elseif ($taskType === 'document_gen') {
+                try {
+                    $certGen = app(\App\Services\CertificateGenerator::class);
+                    $pdf = $certGen->generate($instance);
+                    $docTitle = $nextNode['data']['documentTitle'] ?? 'Analiz Sertifikası (CoA)';
+                    
+                    $data = (array) $instance->data;
+                    $docs = $data['_generated_documents'] ?? [];
+                    $docs[] = [
+                        'title'      => $docTitle,
+                        'type'       => $nextNode['data']['documentType'] ?? 'certificate_of_analysis',
+                        'url'        => route('processes.certificate', $instance->id),
+                        'created_at' => now()->toIso8601String(),
+                    ];
+                    $data['_generated_documents'] = $docs;
+                    $instance->update(['data' => $data]);
+                } catch (\Throwable $e) {
+                    Log::error("Otomatik Belge Üretici Hatası: " . $e->getMessage());
+                }
+                $this->advance($instance, 'approve');
+            } elseif ($taskType === 'sap_sync') {
+                try {
+                    $sapService = app(\App\Services\SapIntegrationService::class);
+                    $followUp = $instance->latestFollowUp;
+                    if ($followUp) {
+                        $sapService->syncSampleOrder($followUp);
+                    }
+                } catch (\Throwable $e) {
+                    Log::error("SAP Senkronizasyon Düğüm Hatası: " . $e->getMessage());
+                }
+                $this->advance($instance, 'approve');
+            } elseif ($taskType === 'follow_up') {
+                try {
+                    $nodeData = $nextNode['data'] ?? [];
+                    $assignedTo = $instance->started_by;
+                    $assignType = $nodeData['assignType'] ?? 'starter';
+                    if ($assignType === 'user' && !empty($nodeData['assignValue'])) {
+                        $assignedTo = (int) $nodeData['assignValue'];
+                    }
+
+                    $options = [
+                        'followUpTitle'     => $nodeData['followUpTitle'] ?? $nodeData['label'] ?? 'Süreç Takibi',
+                        'followUpPrompt'    => $nodeData['followUpPrompt'] ?? 'Talep süreci tamamlanmıştır. Lütfen güncel durumu sisteme işleyiniz.',
+                        'subFormId'         => $nodeData['subFormId'] ?? null,
+                        'followUpDays'      => $nodeData['followUpDays'] ?? null,
+                        'followUpInterval'  => $nodeData['followUpIntervalDays'] ?? null,
+                        'maxReminders'      => $nodeData['followUpMaxReminders'] ?? null,
+                        'followUpType'      => $nodeData['followUpType'] ?? 'general_follow_up',
+                        'assigned_to'       => $assignedTo,
+                    ];
+                    app(\App\Services\FollowUpService::class)->scheduleFollowUp($instance, $options);
+                } catch (\Throwable $e) {
+                    Log::error("Follow-up Düğüm Hatası: " . $e->getMessage());
                 }
                 $this->advance($instance, 'approve');
             } elseif ($taskType === 'system_rule') {
@@ -340,5 +444,27 @@ class ProcessEngine
             $workflow->nodes ?? [],
             $workflow->edges ?? []
         );
+    }
+
+    private function handleProcessCompleted(ProcessInstance $instance): void
+    {
+        try {
+            $workflow = $instance->workflow;
+            if (!$workflow) {
+                return;
+            }
+
+            $workflowName = mb_strtolower($workflow->name ?? '', 'UTF-8');
+            $isSample = !empty($workflow->follow_up_enabled)
+                || !empty($workflow->is_sample_workflow)
+                || str_contains($workflowName, 'numune')
+                || str_contains($workflowName, 'sample');
+
+            if ($isSample) {
+                app(\App\Services\FollowUpService::class)->scheduleFollowUp($instance);
+            }
+        } catch (\Throwable $e) {
+            Log::error("Süreç tamamlama hook hatası (FollowUp): " . $e->getMessage());
+        }
     }
 }

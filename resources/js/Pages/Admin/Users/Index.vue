@@ -42,6 +42,14 @@ const selectedUsersToSync = ref([]);
 const selectAllSync = ref(false);
 const isApplyingSync = ref(false);
 
+const toastMessage = ref('');
+const toastType = ref('success');
+const showToast = (msg, type = 'success') => {
+    toastMessage.value = msg;
+    toastType.value = type;
+    setTimeout(() => { toastMessage.value = ''; }, 4500);
+};
+
 const previewAllSync = async () => {
     isSyncingAll.value = true;
     try {
@@ -52,11 +60,11 @@ const previewAllSync = async () => {
             selectAllSync.value = true;
             showSyncModal.value = true;
         } else {
-            alert(response.data.error || 'Merkezi sistemle iletişim kurulamadı.');
+            showToast(response.data.error || 'Merkezi sistemle iletişim kurulamadı.', 'error');
         }
     } catch (e) {
         console.error(e);
-        alert('Bir hata oluştu.');
+        showToast('Merkezi sistem ile iletişim kurulurken bir hata oluştu.', 'error');
     } finally {
         isSyncingAll.value = false;
     }
@@ -80,7 +88,7 @@ watch(selectedUsersToSync, (val) => {
 
 const applyAllSync = () => {
     if (selectedUsersToSync.value.length === 0) {
-        alert('Lütfen güncellenecek en az bir kullanıcı seçin.');
+        showToast('Lütfen güncellenecek en az bir kullanıcı seçin.', 'error');
         return;
     }
 
@@ -122,6 +130,12 @@ const deleteUser = (id) => {
     <Head title="Kullanıcı Havuzu" />
 
     <AuthenticatedLayout>
+        <!-- Floating Toast Notification -->
+        <div v-if="toastMessage" class="fixed top-5 right-5 z-[9999] px-5 py-3 rounded-xl shadow-2xl text-sm font-bold flex items-center gap-2 transition-all duration-300" :class="toastType === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'">
+            <span>{{ toastType === 'error' ? '⚠️' : '✅' }}</span>
+            <span>{{ toastMessage }}</span>
+        </div>
+
         <template #header>
             <div class="flex justify-between items-center">
                 <h2 class="font-semibold text-xl text-gray-800 leading-tight">Personel ve Kullanıcı Havuzu</h2>

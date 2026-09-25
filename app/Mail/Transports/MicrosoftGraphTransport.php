@@ -33,12 +33,44 @@ class MicrosoftGraphTransport extends AbstractTransport
 
         $token = $tokenResponse->json('access_token');
 
-        // 2. ADIM: Alıcıları Ayarla
+        // 2. ADIM: Alıcıları Ayarla (LOKAL GELİŞTİRME & TEST KORUMA KALKANI)
+        $isLocal = app()->environment('local') || config('app.debug', false);
+        $developerEmail = 'aslihan.aydin@koksan.com';
+
         $toRecipients = [];
+        $originalAddresses = [];
+
         foreach ($email->getTo() as $address) {
-            $toRecipients[] = [
-                'emailAddress' => ['address' => $address->getAddress()]
-            ];
+            $addr = strtolower(trim($address->getAddress()));
+            $originalAddresses[] = $addr;
+
+            if ($isLocal) {
+                // Lokal ortamda gerçek şirket personeline veya grup e-postalarına mail gitmesini kesin olarak durdur
+                if ($addr === strtolower($developerEmail) || $addr === 'superadmin@koksan.com') {
+                    $toRecipients[] = ['emailAddress' => ['address' => $addr]];
+                }
+            } else {
+                $toRecipients[] = ['emailAddress' => ['address' => $addr]];
+            }
+        }
+
+        // Eğer lokalde başka bir personele mail gidiyorsa, personeli rahatsız etmeden geliştiriciye (Aslıhan Hanım'a) yönlendir
+        if ($isLocal && empty($toRecipients) && !empty($originalAddresses)) {
+            $toRecipients[] = ['emailAddress' => ['address' => $developerEmail]];
+        }
+
+        // Eğer alıcı yoksa gönderimi sonlandır
+        if (empty($toRecipients)) {
+            \Illuminate\Support\Facades\Log::info('[MAIL TRAP] Lokal testte dış personele giden e-posta güvenle engellendi.', [
+                'intended_to' => $originalAddresses,
+                'subject' => $email->getSubject(),
+            ]);
+            return;
+        }
+
+        $subject = $email->getSubject();
+        if ($isLocal && !str_starts_with($subject, '[TEST]')) {
+            $subject = '[TEST - Hedef: ' . implode(', ', $originalAddresses) . '] ' . $subject;
         }
 
         // 3. ADIM: İçeriği Ayarla (HTML mi düz metin mi?)
@@ -55,7 +87,7 @@ class MicrosoftGraphTransport extends AbstractTransport
         Http::withoutVerifying()->withToken($token)
             ->post("https://graph.microsoft.com/v1.0/users/{$this->fromAddress}/sendMail", [
                 'message' => [
-                    'subject' => $email->getSubject(),
+                    'subject' => $subject,
                     'body' => [
                         'contentType' => $contentType,
                         'content' => $content

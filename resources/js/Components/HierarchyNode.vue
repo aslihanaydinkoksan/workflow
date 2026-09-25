@@ -41,7 +41,7 @@ const formatValue = (value) => {
             <div class="bg-white rounded-xl p-3 border shadow-sm relative group transition-all"
                  :class="showDetails ? 'border-indigo-300 ring-1 ring-indigo-100 shadow-md' : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'"
                  @dragover.prevent="$emit('dragover', $event)" 
-                 @drop="$emit('drop', $event, item.node.id)">
+                 @drop.prevent="$emit('drop', $event, item.node.id)">
                 
                 <div class="flex items-center justify-between">
                     
@@ -96,7 +96,7 @@ const formatValue = (value) => {
                     @remove="$emit('remove', $event)"
                     @dragstart="$emit('dragstart', $event)" 
                     @dragover="$emit('dragover', $event)" 
-                    @drop="$emit('drop', $event, arguments[1])"
+                    @drop="(...args) => $emit('drop', ...args)"
                 />
             </div>
         </div>

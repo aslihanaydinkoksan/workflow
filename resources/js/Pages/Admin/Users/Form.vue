@@ -37,12 +37,10 @@ const previewSync = async () => {
             showSyncModal.value = true;
         } else {
             syncError.value = response.data.error || 'Merkezi sistemle iletişim kurulamadı.';
-            alert(syncError.value);
         }
     } catch (e) {
         console.error(e);
-        syncError.value = 'Bir hata oluştu.';
-        alert(syncError.value);
+        syncError.value = 'Merkezi sistem ile iletişim kurulurken bir hata oluştu.';
     } finally {
         isSyncing.value = false;
     }
@@ -97,6 +95,14 @@ const applySync = () => {
             <div class="max-w-4xl mx-auto sm:px-6 lg:px-8">
                 <div class="bg-white overflow-hidden shadow-sm sm:rounded-xl border border-gray-100">
                     <form @submit.prevent="submit" class="p-8 space-y-8">
+                        <div v-if="syncError" class="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800 text-sm flex items-start gap-3">
+                            <svg class="w-5 h-5 text-red-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <div class="flex-1">
+                                <p class="font-bold">Senkronizasyon Uyarısı</p>
+                                <p class="mt-0.5">{{ syncError }}</p>
+                            </div>
+                            <button type="button" @click="syncError = ''" class="text-red-400 hover:text-red-600 font-bold">&times;</button>
+                        </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                             <!-- Temel Bilgiler (Sadece Görüntüleme) -->
                             <div class="space-y-5 bg-gray-50/50 p-6 rounded-xl border border-gray-100">

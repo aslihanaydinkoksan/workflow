@@ -29,6 +29,9 @@ const hasPermission = (perm) => {
 };
 const pendingTasksCount = computed(() => page.props.pending_tasks_count ?? 0);
 const hasPendingTasks = computed(() => pendingTasksCount.value > 0);
+const pendingFollowUpsCount = computed(() => page.props.pending_follow_ups_count ?? 0);
+const hasPendingFollowUps = computed(() => pendingFollowUpsCount.value > 0);
+const myRunningProcessesCount = computed(() => page.props.my_running_processes_count ?? 0);
 const unreadNotificationsCount = computed(() => page.props.unread_notifications_count ?? 0);
 const recentNotifications = computed(() => page.props.recent_notifications ?? []);
 const hasUnreadNotifications = computed(() => unreadNotificationsCount.value > 0);
@@ -55,6 +58,11 @@ const getNotificationTypeLabel = (notification) => {
         case 'task_assigned': return 'Yeni görev';
         case 'task_rejected': return 'Reddedildi';
         case 'task_due_soon': return 'Süre doluyor';
+        case 'task_overdue': return 'Süresi doldu';
+        case 'workflow_completed': return 'Tamamlandı';
+        case 'sample_follow_up': return 'Süreç Takibi';
+        case 'system': return 'Sistem Uyarısı';
+        case 'delegation_assigned': return 'Vekalet';
         default: return 'Bildirim';
     }
 };
@@ -267,26 +275,39 @@ onBeforeUnmount(() => {
                                     🏠 Ana Sayfa
                                 </NavLink>
 
-                                <NavLink v-if="hasPermission('start_processes')" :href="route('processes.index')"
-                                    :active="route().current('processes.index')">
-                                    🚀 Yeni Talep Başlat
+                                <NavLink :href="route('tasks.index')"
+                                    :active="route().current('tasks.*')">
+                                    📥 İş Listem
+                                    <span v-if="pendingTasksCount > 0" class="ml-1.5 px-2 py-0.5 text-[11px] font-bold bg-rose-500 text-white rounded-full">
+                                        {{ pendingTasksCount }}
+                                    </span>
                                 </NavLink>
 
-                                <NavLink :href="route('tasks.index')"
-                                    :active="route().current('tasks.index') || route().current('tasks.show')"
-                                    :alert="hasPendingTasks">
-                                    ✅ Bekleyen Onaylarım
+                                <NavLink v-if="hasPermission('start_processes')" :href="route('processes.index')"
+                                    :active="route().current('processes.index') || route().current('processes.create')">
+                                    🚀 Talep Başlat
                                 </NavLink>
 
                                 <NavLink :href="route('processes.history')"
-                                    :active="route().current('processes.history')">
-                                    📁 Benim Taleplerim
+                                    :active="route().current('processes.history') || route().current('processes.tracker')">
+                                    📁 Taleplerim
+                                    <span v-if="myRunningProcessesCount > 0" class="ml-1.5 px-2 py-0.5 text-[11px] font-bold bg-amber-100 text-amber-800 rounded-full">
+                                        {{ myRunningProcessesCount }}
+                                    </span>
+                                </NavLink>
+
+                                <NavLink :href="route('follow-ups.index')"
+                                    :active="route().current('follow-ups.*')">
+                                    ⏱️ Takipler
+                                    <span v-if="pendingFollowUpsCount > 0" class="ml-1.5 px-2 py-0.5 text-[11px] font-bold bg-purple-600 text-white rounded-full">
+                                        {{ pendingFollowUpsCount }}
+                                    </span>
                                 </NavLink>
 
                                 <NavLink v-if="hasPermission('processes.view_department')"
                                     :href="route('processes.department')"
                                     :active="route().current('processes.department')">
-                                    Bölüm Süreçleri
+                                    👥 Bölüm Süreçleri
                                 </NavLink>
                             </div>
                         </div>
@@ -412,7 +433,7 @@ onBeforeUnmount(() => {
                                         <DropdownLink v-if="hasPermission('view_admin_panel')"
                                             :href="route('admin.tree-types.index')">Şema Tasarımcısı</DropdownLink>
                                         <DropdownLink v-if="hasPermission('view_admin_panel')"
-                                            :href="route('admin.hierarchy.test')">Organizasyon Şeması</DropdownLink>
+                                            :href="route('admin.hierarchy.index')">Organizasyon Şeması</DropdownLink>
                                     </template>
                                 </Dropdown>
                             </div>
@@ -475,31 +496,59 @@ onBeforeUnmount(() => {
                 <div :class="{ 'block': showingNavigationDropdown, 'hidden': !showingNavigationDropdown }"
                     class="sm:hidden border-t border-gray-200">
                     <div class="pt-2 pb-3 space-y-1">
-                        <ResponsiveNavLink :href="route('dashboard')" :active="route().current('dashboard')">🏠 Ana
-                            Sayfa
+                        <ResponsiveNavLink :href="route('dashboard')" :active="route().current('dashboard')">
+                            🏠 Ana Sayfa
+                        </ResponsiveNavLink>
+
+                        <ResponsiveNavLink :href="route('tasks.index')"
+                            :active="route().current('tasks.*')">
+                            <div class="flex items-center justify-between w-full">
+                                <span>📥 İş Listem</span>
+                                <span v-if="pendingTasksCount > 0" class="px-2 py-0.5 text-xs font-bold bg-rose-500 text-white rounded-full">
+                                    {{ pendingTasksCount }}
+                                </span>
+                            </div>
                         </ResponsiveNavLink>
 
                         <ResponsiveNavLink v-if="hasPermission('start_processes')" :href="route('processes.index')"
-                            :active="route().current('processes.index')">🚀 Yeni Talep Başlat</ResponsiveNavLink>
-
-                        <ResponsiveNavLink :href="route('tasks.index')"
-                            :active="route().current('tasks.index') || route().current('tasks.show')"
-                            :alert="hasPendingTasks">
-                            ✅ Bekleyen Onaylarım
+                            :active="route().current('processes.index') || route().current('processes.create')">
+                            🚀 Talep Başlat
                         </ResponsiveNavLink>
 
                         <ResponsiveNavLink :href="route('processes.history')"
-                            :active="route().current('processes.history')">📁 Benim
-                            Taleplerim</ResponsiveNavLink>
+                            :active="route().current('processes.history') || route().current('processes.tracker')">
+                            <div class="flex items-center justify-between w-full">
+                                <span>📁 Taleplerim</span>
+                                <span v-if="myRunningProcessesCount > 0" class="px-2 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 rounded-full">
+                                    {{ myRunningProcessesCount }}
+                                </span>
+                            </div>
+                        </ResponsiveNavLink>
+
+                        <ResponsiveNavLink :href="route('follow-ups.index')"
+                            :active="route().current('follow-ups.*')">
+                            <div class="flex items-center justify-between w-full">
+                                <span>⏱️ Takipler</span>
+                                <span v-if="pendingFollowUpsCount > 0" class="px-2 py-0.5 text-xs font-bold bg-purple-600 text-white rounded-full">
+                                    {{ pendingFollowUpsCount }}
+                                </span>
+                            </div>
+                        </ResponsiveNavLink>
 
                         <ResponsiveNavLink :href="route('notifications.index')"
                             :active="route().current('notifications.*')">
-                            🔔 Bildirimler
+                            <div class="flex items-center justify-between w-full">
+                                <span>🔔 Bildirimler</span>
+                                <span v-if="hasUnreadNotifications" class="px-2 py-0.5 text-xs font-bold bg-red-500 text-white rounded-full">
+                                    {{ unreadNotificationsCount }}
+                                </span>
+                            </div>
                         </ResponsiveNavLink>
 
                         <ResponsiveNavLink v-if="hasPermission('processes.view_department')"
                             :href="route('processes.department')" :active="route().current('processes.department')">
-                            Bölüm Süreçleri</ResponsiveNavLink>
+                            👥 Bölüm Süreçleri
+                        </ResponsiveNavLink>
                     </div>
 
                     <!-- Responsive Admin Links -->
@@ -537,7 +586,7 @@ onBeforeUnmount(() => {
                             :href="route('admin.tree-types.index')">Şema
                             Tasarımcısı</ResponsiveNavLink>
                         <ResponsiveNavLink v-if="hasPermission('view_admin_panel')"
-                            :href="route('admin.hierarchy.test')">Organizasyon
+                            :href="route('admin.hierarchy.index')">Organizasyon
                             Şeması</ResponsiveNavLink>
                     </div>
 
