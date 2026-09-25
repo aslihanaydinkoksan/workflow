@@ -120,19 +120,21 @@ class SyncUsersPreviewAction
     }
 
     /**
-     * MYS unvan ve niteliklerine göre kullanıcının sahip olması gereken yetki rollerini otomatik hesaplar.
+     * MYS unvan ve niteliklerine göre kullanıcının sistemdeki 8 resmi role göre eşleşmesini sağlar.
+     * Resmi Roller: Admin, Süreç Tasarımcısı, Direktör, Müdür, Amir, Kullanıcı, Müşteri, Mavi Yaka
      */
     public function resolveExpectedRoles(array $centralUser, ?User $existingUser = null, array $deptManagerUserIds = [], array $directorUserIds = []): array
     {
         $roles = [];
 
-        // Mevcut özel idari yetkileri koru (Admin, Süreç Tasarımcısı, IT Uzmanı vb.)
+        // 1. İdari Özel Rolleri Koru (Admin, Süreç Tasarımcısı sistemden elle verilir, senkronizasyonda silinmez)
         if ($existingUser) {
             $currentRoles = $existingUser->roles->pluck('name')->toArray();
-            foreach (['Admin', 'superadmin', 'Süreç Tasarımcısı', 'IT Uzmanı', 'Eğitim Yetkilisi'] as $specialRole) {
-                if (in_array($specialRole, $currentRoles, true)) {
-                    $roles[] = $specialRole;
-                }
+            if (in_array('Admin', $currentRoles, true)) {
+                $roles[] = 'Admin';
+            }
+            if (in_array('Süreç Tasarımcısı', $currentRoles, true)) {
+                $roles[] = 'Süreç Tasarımcısı';
             }
         }
 
@@ -141,12 +143,13 @@ class SyncUsersPreviewAction
         $isMaviYaka = !empty($centralUser['is_mavi_yaka']);
         $isCustomer = !empty($centralUser['is_customer']);
 
+        // 2. Müşteri Rolü
         if ($isCustomer) {
             $roles[] = 'Müşteri';
             return array_values(array_unique($roles));
         }
 
-        // 1. Direktör
+        // 3. Direktör Rolü (MYS Direktörlüğü veya Unvanında Direktör/GMY/CEO geçenler)
         $isDirector = ($userId && in_array($userId, $directorUserIds, true))
             || str_contains($title, 'DİREKTÖR')
             || str_contains($title, 'GENEL MÜDÜR')
@@ -155,17 +158,19 @@ class SyncUsersPreviewAction
 
         if ($isDirector) {
             $roles[] = 'Direktör';
+            return array_values(array_unique($roles));
         }
 
-        // 2. Müdür
+        // 4. Müdür Rolü (MYS Departman Müdürü veya Unvanında Müdür geçenler)
         $isMudur = ($userId && isset($deptManagerUserIds[$userId]) && $deptManagerUserIds[$userId] === 'manager')
             || (str_contains($title, 'MÜDÜR') && !str_contains($title, 'YARDIMCI') && !str_contains($title, 'YRD'));
 
         if ($isMudur) {
             $roles[] = 'Müdür';
+            return array_values(array_unique($roles));
         }
 
-        // 3. Amir (Şef, Amir, Sorumlu, Müdür Yardımcısı, Lider)
+        // 5. Amir Rolü (MYS Müdür Yrd. veya Unvanında Şef, Amir, Müdür Yrd, Sorumlu, Lider geçenler)
         $isAmir = ($userId && isset($deptManagerUserIds[$userId]) && $deptManagerUserIds[$userId] === 'assistant_manager')
             || str_contains($title, 'AMİR')
             || str_contains($title, 'ŞEF')
@@ -178,17 +183,17 @@ class SyncUsersPreviewAction
 
         if ($isAmir) {
             $roles[] = 'Amir';
+            return array_values(array_unique($roles));
         }
 
-        // 4. Mavi Yaka
+        // 6. Mavi Yaka Rolü
         if ($isMaviYaka) {
             $roles[] = 'Mavi Yaka';
+            return array_values(array_unique($roles));
         }
 
-        // 5. Standart Kullanıcı Rolü (Müşteri değilse ve salt mavi yaka değilse en az Kullanıcı rolü olmalıdır)
-        if (empty($roles) || in_array('Müdür', $roles, true) || in_array('Amir', $roles, true) || in_array('Direktör', $roles, true) || !$isMaviYaka) {
-            $roles[] = 'Kullanıcı';
-        }
+        // 7. Kullanıcı Rolü (Yukarıdaki unvanlara girmeyen tüm şirket personeli: Uzman, Mühendis, Memur vb.)
+        $roles[] = 'Kullanıcı';
 
         return array_values(array_unique($roles));
     }
