@@ -320,7 +320,7 @@ const deleteUser = (id) => {
                                         <div class="space-y-2">
                                             <div v-for="(change, field) in user.changes" :key="field" class="flex items-center text-xs">
                                                 <span class="font-bold text-gray-700 capitalize w-24 flex-shrink-0">
-                                                    {{ field === 'tc_no' ? 'TC No' : field === 'registration_no' ? 'Sicil No' : field === 'title' ? 'Ünvan' : field === 'department_id' ? 'Departman' : field === 'is_customer' ? 'Müşteri Mi?' : field === 'is_mavi_yaka' ? 'Mavi Yaka Mı?' : field }}:
+                                                    {{ field === 'tc_no' ? 'TC No' : field === 'registration_no' ? 'Sicil No' : field === 'title' ? 'Ünvan' : field === 'department_id' ? 'Departman' : field === 'is_customer' ? 'Müşteri Mi?' : field === 'is_mavi_yaka' ? 'Mavi Yaka Mı?' : field === 'roles' ? 'Yetki Rolleri' : field }}:
                                                 </span>
                                                 <span class="text-red-500 line-through mr-2">{{ change.old || '(Boş)' }}</span>
                                                 <svg class="w-3 h-3 text-gray-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>

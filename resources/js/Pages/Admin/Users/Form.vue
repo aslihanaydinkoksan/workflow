@@ -201,7 +201,7 @@ const applySync = () => {
                     <div v-if="Object.keys(syncPreviewData?.changes || {}).length > 0" class="space-y-3">
                         <div v-for="(change, field) in syncPreviewData.changes" :key="field" class="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                             <div class="font-bold text-sm text-gray-700 capitalize w-1/4">
-                                {{ field === 'tc_no' ? 'TC Kimlik No' : field === 'registration_no' ? 'Sicil No' : field === 'title' ? 'Ünvan' : field === 'department_id' ? 'Departman' : field === 'is_customer' ? 'Müşteri Mi?' : field === 'is_mavi_yaka' ? 'Mavi Yaka Mı?' : field }}
+                                {{ field === 'tc_no' ? 'TC Kimlik No' : field === 'registration_no' ? 'Sicil No' : field === 'title' ? 'Ünvan' : field === 'department_id' ? 'Departman' : field === 'is_customer' ? 'Müşteri Mi?' : field === 'is_mavi_yaka' ? 'Mavi Yaka Mı?' : field === 'roles' ? 'Yetki Rolleri' : field }}
                             </div>
                             <div class="flex-1 flex items-center gap-3">
                                 <div class="flex-1 bg-red-50 text-red-700 border border-red-100 p-2 rounded-lg text-sm text-center line-through opacity-70">

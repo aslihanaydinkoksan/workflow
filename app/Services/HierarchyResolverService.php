@@ -87,24 +87,91 @@ class HierarchyResolverService
 
     /**
      * Departman yöneticisini bulur.
+     * 1. Resmi departman müdürü (department_managers tablosu)
+     * 2. Resmi müdür yardımcısı (department_managers tablosu)
+     * 3. Departmandaki 'Müdür' rolüne sahip ilk aktif personel
+     * 4. Departmandaki 'Amir' rolüne sahip ilk aktif personel (Şef, Sorumlu vb.)
+     * 5. Unvanında Yönetici/Şef/Amir geçen beyaz yaka personel
+     * 6. Departmandaki ilk beyaz yaka aktif personel
+     * 7. Son Çare (Fallback): Departmandaki ilk aktif kullanıcı
      */
     private function resolveDepartmentManager(array $nodeData): ?int
     {
         $departmentId = $nodeData['assignValue'] ?? null;
         if (!$departmentId) return null;
 
+        // 1. Resmi departman yöneticisi (Müdür)
         $managerRel = DB::table('department_managers')
             ->where('department_id', $departmentId)
             ->where('type', 'manager')
             ->first();
 
-        // Yönetici yoksa departmandaki ilk kişiyi yedek olarak ata
-        if (!$managerRel) {
-            $deptUser = User::where('department_id', $departmentId)->first();
-            return $deptUser?->id;
+        if ($managerRel) {
+            return (int) $managerRel->user_id;
         }
 
-        return $managerRel->user_id;
+        // 2. Resmi müdür yardımcısı
+        $assistantRel = DB::table('department_managers')
+            ->where('department_id', $departmentId)
+            ->where('type', 'assistant_manager')
+            ->first();
+
+        if ($assistantRel) {
+            return (int) $assistantRel->user_id;
+        }
+
+        // 3. Departmandaki 'Müdür' rolüne sahip aktif personel
+        $deptMudur = User::where('department_id', $departmentId)
+            ->where('is_active', true)
+            ->whereHas('roles', fn($q) => $q->where('name', 'Müdür'))
+            ->first();
+
+        if ($deptMudur) {
+            return $deptMudur->id;
+        }
+
+        // 4. Departmandaki 'Amir' rolüne sahip aktif personel (Şef, Amir vb.)
+        $deptAmir = User::where('department_id', $departmentId)
+            ->where('is_active', true)
+            ->whereHas('roles', fn($q) => $q->where('name', 'Amir'))
+            ->first();
+
+        if ($deptAmir) {
+            return $deptAmir->id;
+        }
+
+        // 5. Unvanında Yönetici/Şef/Amir/Müdür geçen beyaz yaka personel
+        $titleManager = User::where('department_id', $departmentId)
+            ->where('is_active', true)
+            ->where('is_mavi_yaka', false)
+            ->where(function ($q) {
+                $q->where('title', 'like', '%MÜDÜR%')
+                  ->orWhere('title', 'like', '%ŞEF%')
+                  ->orWhere('title', 'like', '%AMİR%')
+                  ->orWhere('title', 'like', '%SORUMLU%');
+            })
+            ->first();
+
+        if ($titleManager) {
+            return $titleManager->id;
+        }
+
+        // 6. Departmandaki ilk beyaz yaka personel
+        $whiteCollar = User::where('department_id', $departmentId)
+            ->where('is_active', true)
+            ->where('is_mavi_yaka', false)
+            ->first();
+
+        if ($whiteCollar) {
+            return $whiteCollar->id;
+        }
+
+        // 7. Son Çare: Departmandaki ilk aktif kullanıcı
+        $deptUser = User::where('department_id', $departmentId)
+            ->where('is_active', true)
+            ->first();
+
+        return $deptUser?->id;
     }
 
     /**

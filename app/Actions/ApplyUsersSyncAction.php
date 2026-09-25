@@ -30,7 +30,7 @@ class ApplyUsersSyncAction
 
                 if (str_starts_with($update['user_id'], 'new_')) {
                     // YENİ KULLANICI EKLEME
-                    User::create([
+                    $newUser = User::create([
                         'name'            => $update['name'],
                         'email'           => $update['email'],
                         'password'        => $dummyPassword,
@@ -41,6 +41,9 @@ class ApplyUsersSyncAction
                         'is_mavi_yaka'    => $changes['is_mavi_yaka']['new_val'] ?? false,
                         'department_id'   => $changes['department_id']['new_id'] ?? null,
                     ]);
+                    if (!empty($changes['roles']['new_roles'])) {
+                        $newUser->syncRoles($changes['roles']['new_roles']);
+                    }
                     $addedCount++;
                 } else {
                     // MEVCUT KULLANICIYI GÜNCELLEME
@@ -56,8 +59,16 @@ class ApplyUsersSyncAction
                         if (array_key_exists('is_mavi_yaka', $changes)) $userUpdates['is_mavi_yaka'] = $changes['is_mavi_yaka']['new_val'];
                         if (array_key_exists('department_id', $changes)) $userUpdates['department_id'] = $changes['department_id']['new_id'];
 
-                        if (!empty($userUpdates)) {
-                            $user->update($userUpdates);
+                        $hasRoleUpdate = false;
+                        if (isset($changes['roles']['new_roles'])) {
+                            $user->syncRoles($changes['roles']['new_roles']);
+                            $hasRoleUpdate = true;
+                        }
+
+                        if (!empty($userUpdates) || $hasRoleUpdate) {
+                            if (!empty($userUpdates)) {
+                                $user->update($userUpdates);
+                            }
                             $updatedCount++;
                         }
                     }
