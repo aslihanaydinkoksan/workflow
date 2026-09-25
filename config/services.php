@@ -38,6 +38,8 @@ return [
         'url' => env('CENTRAL_SSO_URL', 'http://localhost:8001'),
         'api_key' => env('CENTRAL_SSO_API_KEY', 'koksan123'),
         'timeout' => 5, // MYS kapalıysa sistemi kitlememesi için 5 saniyelik limit
+        'use_central_sso' => env('USE_CENTRAL_SSO', false),
+        'app_code' => env('CENTRAL_SSO_APP_CODE', 'workflow-app'),
     ],
 
 ];

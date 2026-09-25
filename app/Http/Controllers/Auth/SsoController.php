@@ -15,18 +15,25 @@ class SsoController extends Controller
     public function login(Request $request)
     {
         $token = $request->query('token');
-        $centralUrl = rtrim(env('CENTRAL_SSO_URL', 'http://localhost:8001'), '/');
+        $centralUrl = rtrim(config('services.mys.url', env('CENTRAL_SSO_URL', 'http://localhost:8001')), '/');
+        $apiKey = config('services.mys.api_key', env('CENTRAL_SSO_API_KEY'));
 
         if (!$token) {
             return redirect($centralUrl);
         }
 
         // Merkezi API'ye token'ı doğrulat
-        $response = Http::get($centralUrl . '/api/auth/verify-sso-token', [
+        $http = Http::timeout(config('services.mys.timeout', 10));
+        if ($apiKey) {
+            $http = $http->withHeaders(['X-App-Key' => $apiKey]);
+        }
+
+        $response = $http->get($centralUrl . '/api/auth/verify-sso-token', [
             'token' => $token
         ]);
 
         if ($response->failed()) {
+            \Illuminate\Support\Facades\Log::warning('MYS SSO Dogrulama Basarisiz. Status: ' . $response->status() . ' Body: ' . $response->body());
             return redirect($centralUrl)->with('error', 'Merkezi oturum doğrulanamadı.');
         }
 

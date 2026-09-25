@@ -6,32 +6,32 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 /**
- * Dev ortamında varsayılan olarak local auth (Breeze) kullanıyoruz.
- * Merkezi SSO ile çalıştırmak için .env içine USE_CENTRAL_SSO=true ekleyebilirsin.
+ * Merkezi SSO Rotaları ve Yapılandırması:
+ * Portaldan (MYS) token ile gelen her kullanıcı için /sso/login rotası her zaman aktiftir.
+ * Doğrudan /login adresine girildiğinde MYS'ye yönlendirme ise USE_CENTRAL_SSO=true iken devreye girer.
  */
-$useCentralSso = filter_var(env('USE_CENTRAL_SSO', false), FILTER_VALIDATE_BOOL);
+Route::get('/sso/login', [\App\Http\Controllers\Auth\SsoController::class, 'login'])->name('sso.login');
+
+$useCentralSso = filter_var(config('services.mys.use_central_sso', env('USE_CENTRAL_SSO', false)), FILTER_VALIDATE_BOOL);
 
 if ($useCentralSso) {
     // Merkezi SSO Yönlendirmesi
     Route::get('/login', function (\Illuminate\Http\Request $request) {
-        $centralSsoUrl = rtrim(env('CENTRAL_SSO_URL', 'http://localhost:8001'), '/');
-        $appCode = env('CENTRAL_SSO_APP_CODE', 'workflow-app');
+        $centralSsoUrl = rtrim(config('services.mys.url', env('CENTRAL_SSO_URL', 'http://localhost:8001')), '/');
+        $appCode = config('services.mys.app_code', env('CENTRAL_SSO_APP_CODE', 'workflow-app'));
         $callbackUrl = route('sso.login');
 
         return redirect($centralSsoUrl . '/sso-entry?app_code=' . $appCode . '&redirect_url=' . urlencode($callbackUrl));
     })->name('login');
 
     Route::post('/logout', function (\Illuminate\Http\Request $request) {
-        $centralSsoUrl = rtrim(env('CENTRAL_SSO_URL', 'http://localhost:8001'), '/');
+        $centralSsoUrl = rtrim(config('services.mys.url', env('CENTRAL_SSO_URL', 'http://localhost:8001')), '/');
         \Illuminate\Support\Facades\Auth::guard('web')->logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
         return redirect($centralSsoUrl . '/global-logout');
     })->name('logout');
-
-    // SSO Geri Dönüş Rotası
-    Route::get('/sso/login', [\App\Http\Controllers\Auth\SsoController::class, 'login'])->name('sso.login');
 } else {
     require __DIR__ . '/auth.php';
 }
