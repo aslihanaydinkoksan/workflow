@@ -33,6 +33,15 @@ class MailSettingsController extends Controller
             'test_recipient_email' => (string) MailSetting::get('test_recipient_email', 'aslihan.aydin@koksan.com'),
         ];
 
+        // Eğer sunucuya taşındıktan sonra seeder çalıştırılmamışsa otomatik olarak varsayılanları yükle
+        if (MailEvent::count() === 0) {
+            try {
+                (new \Database\Seeders\MailSystemSeeder())->run();
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('MailSystemSeeder otomatik çalıştırma uyarısı: ' . $e->getMessage());
+            }
+        }
+
         // 2. Olaylar, aktif şablonlar ve aktif kurallar
         $events = MailEvent::with(['activeTemplate', 'activeRule', 'templates', 'rules'])
             ->orderBy('id')
