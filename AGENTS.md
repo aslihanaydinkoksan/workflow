@@ -96,3 +96,26 @@ Yönetim el yazısı görev notuna göre uçtan uca dijitalleştirilen entegre d
    - `php scratch/test_dis_gorev_e2e.php` (Tüm 10 adım uçtan uca otomatik test edilir).
    - `php artisan db:seed --class=DisGorevWorkflowSeeder`
 
+---
+
+## 5. Özel Sistem Modülü: "Dinamik E-Posta Yönetim Paneli & Mail Rule Engine"
+Test aşamalarında dış kullanıcılara yanlışlıkla e-posta gitmesini önleyen, global kill-switch, test modu sandbox yönlendirmesi ve mesai/zaman pencereli kural motorudur.
+
+### Temel Bileşenler:
+1. **Veritabanı Katmanı (`mail_settings`, `mail_events`, `mail_templates`, `mail_rules`):**
+   - Modeller: `MailSetting`, `MailEvent`, `MailTemplate`, `MailRule`.
+   - Seeder: `MailSystemSeeder` (`php artisan db:seed --class=MailSystemSeeder`).
+2. **Merkezi Güvenlik Kalkanı (`App\Listeners\MailGuardListener`):**
+   - Laravel `MessageSending` olayını dinler.
+   - Global Kill Switch açıkken e-posta çıkışını `return false` ile anında durdurur.
+   - Olay tespiti: `X-Mail-Event` başlığı, bildirim tipi veya konu eşleştirmesi ile 4 katmanlı tespit.
+   - Kural denetimi: `allowed_days` ve `allowed_time_start - allowed_time_end` mesai saatleri penceresi (Europe/Istanbul).
+   - Test Modu Override: Gerçek alıcıları (`To`, `Cc`, `Bcc`) temizleyip `test_recipient_email` adresine yönlendirir; konuya `[TEST - To: {orijinal_alicilar}]` ekler.
+3. **Backend & Arayüz:**
+   - Controller: `App\Http\Controllers\Admin\MailSettingsController` (`/admin/mail-settings`).
+   - Arayüz: `resources/js/Pages/Admin/MailSettings/Index.vue`.
+   - Menü: `AuthenticatedLayout.vue` içinde `⚙️ Sistem Yönetimi -> 📧 E-Posta Yönetimi`.
+4. **Test & Doğrulama Komutu:**
+   - `php artisan mail:test-guard --event=task_assigned --to=serkan.telek@koksan.com`
+
+

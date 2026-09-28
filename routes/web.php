@@ -127,6 +127,18 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('settings', [\App\Http\Controllers\Admin\SettingsController::class, 'index'])->name('settings.index')->middleware('can:view_admin_panel');
         Route::post('settings', [\App\Http\Controllers\Admin\SettingsController::class, 'update'])->name('settings.update')->middleware('can:view_admin_panel');
 
+        // Dinamik E-Posta & Kural Yönetimi (Mail Rule Engine)
+        Route::prefix('mail-settings')->name('mail-settings.')->middleware('can:view_admin_panel')->group(function () {
+            Route::get('/', [\App\Http\Controllers\Admin\MailSettingsController::class, 'index'])->name('index');
+            Route::post('/global', [\App\Http\Controllers\Admin\MailSettingsController::class, 'updateGlobalSettings'])->name('global.update');
+            Route::post('/events', [\App\Http\Controllers\Admin\MailSettingsController::class, 'storeEvent'])->name('events.store');
+            Route::patch('/events/{event}/status', [\App\Http\Controllers\Admin\MailSettingsController::class, 'updateEventStatus'])->name('events.status');
+            Route::delete('/events/{event}', [\App\Http\Controllers\Admin\MailSettingsController::class, 'destroyEvent'])->name('events.destroy');
+            Route::put('/rules/{rule}', [\App\Http\Controllers\Admin\MailSettingsController::class, 'updateRule'])->name('rules.update');
+            Route::put('/templates/{template}', [\App\Http\Controllers\Admin\MailSettingsController::class, 'updateTemplate'])->name('templates.update');
+            Route::post('/test-mail', [\App\Http\Controllers\Admin\MailSettingsController::class, 'sendTestMail'])->name('test-mail');
+        });
+
         // Form Kategorileri
         Route::resource('form-categories', \App\Http\Controllers\Admin\FormCategoryController::class)->only(['index', 'store', 'update', 'destroy'])->middleware('can:create_forms');
 

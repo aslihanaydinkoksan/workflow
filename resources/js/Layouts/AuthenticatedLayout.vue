@@ -404,6 +404,8 @@ onBeforeUnmount(() => {
                                             Ayarlar</div>
                                         <DropdownLink v-if="hasPermission('view_admin_panel')"
                                             :href="route('admin.settings.index')">Sistem Ayarları</DropdownLink>
+                                        <DropdownLink v-if="hasPermission('view_admin_panel')"
+                                            :href="route('admin.mail-settings.index')">📧 E-Posta Yönetimi</DropdownLink>
                                         <DropdownLink v-if="hasPermission('manage_users')"
                                             :href="route('admin.users.index')">Kullanıcılar</DropdownLink>
                                         <DropdownLink v-if="hasPermission('manage_roles')"
