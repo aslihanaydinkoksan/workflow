@@ -5,7 +5,9 @@ import Dropdown from '@/Components/Dropdown.vue';
 import DropdownLink from '@/Components/DropdownLink.vue';
 import NavLink from '@/Components/NavLink.vue';
 import ResponsiveNavLink from '@/Components/ResponsiveNavLink.vue';
+import DevUserSwitcher from '@/Components/DevUserSwitcher.vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
+import axios from 'axios';
 
 const showingNavigationDropdown = ref(false);
 const showPendingTasksToast = ref(false);
@@ -27,14 +29,94 @@ const hasPermission = (perm) => {
     const perms = page.props.auth?.permissions || page.props.user?.permissions || [];
     return perms.includes(perm);
 };
+
+// Kişisel ve Havuz Görev Sayıları
 const pendingTasksCount = computed(() => page.props.pending_tasks_count ?? 0);
+const totalPoolTasksCount = computed(() => page.props.total_pool_tasks_count ?? 0);
+const overdueTasksCount = computed(() => page.props.overdue_tasks_count ?? 0);
+const isAdminUser = computed(() => !!page.props.is_admin_user || userRoles.value.includes('Admin') || userRoles.value.includes('superadmin'));
 const hasPendingTasks = computed(() => pendingTasksCount.value > 0);
 const pendingFollowUpsCount = computed(() => page.props.pending_follow_ups_count ?? 0);
 const hasPendingFollowUps = computed(() => pendingFollowUpsCount.value > 0);
 const myRunningProcessesCount = computed(() => page.props.my_running_processes_count ?? 0);
-const unreadNotificationsCount = computed(() => page.props.unread_notifications_count ?? 0);
+
+// Akıllı ve Sakin İş Listesi Rozet Yönetimi (Alert Fatigue Önleyici)
+const taskBadgeInfo = computed(() => {
+    const personal = pendingTasksCount.value;
+    const overdue = overdueTasksCount.value;
+    const pool = totalPoolTasksCount.value;
+    const isAdmin = isAdminUser.value;
+
+    // Geciken görev varsa: Kırmızı alarm rengi yalnızca acil ve süresi aşılmış görevlere ayrılmıştır
+    if (overdue > 0) {
+        return {
+            show: true,
+            isOverdue: true,
+            label: `${overdue} geciken`,
+            tooltip: `${personal} bekleyen görev (${overdue} adedi terminini aştı!)`,
+            classes: 'bg-rose-50 text-rose-700 border border-rose-300 font-bold shadow-xs',
+            dotClass: 'bg-rose-500 animate-pulse'
+        };
+    }
+
+    // Kişisel görevler varsa: Sakin, kurumsal slate/indigo rozet
+    if (personal > 0) {
+        return {
+            show: true,
+            isOverdue: false,
+            label: personal,
+            poolLabel: (isAdmin && pool > personal) ? `${pool} havuz` : null,
+            tooltip: isAdmin ? `${personal} kişisel göreviniz · ${pool} şirket geneli havuz` : `${personal} bekleyen göreviniz`,
+            classes: 'bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 transition-colors font-semibold',
+            dotClass: null
+        };
+    }
+
+    // Admin kullanıcının kişisel görevi yoksa ancak şirket havuzunda işler varsa: Sakin gri havuz etiketi
+    if (isAdmin && pool > 0) {
+        return {
+            show: true,
+            isOverdue: false,
+            label: `${pool} havuz`,
+            tooltip: `Kişisel bekleyen göreviniz yok. Şirket genelinde ${pool} görev işlem bekliyor.`,
+            classes: 'bg-slate-100 text-slate-500 border border-slate-200/80 font-normal text-[10px]',
+            dotClass: null
+        };
+    }
+
+    return { show: false };
+});
+
+// Bildirimler & Çan İkonu Yönetimi
+const localUnreadCleared = ref(false);
+const unreadNotificationsCount = computed(() => {
+    if (localUnreadCleared.value) return 0;
+    return page.props.unread_notifications_count ?? 0;
+});
 const recentNotifications = computed(() => page.props.recent_notifications ?? []);
 const hasUnreadNotifications = computed(() => unreadNotificationsCount.value > 0);
+
+watch(
+    () => page.props.unread_notifications_count,
+    () => {
+        localUnreadCleared.value = false;
+    }
+);
+
+// Çana tıklandığı an sayıyı sıfırla ve arka planda sessizce okundu yap
+const handleBellClick = () => {
+    if (unreadNotificationsCount.value > 0) {
+        localUnreadCleared.value = true;
+        if (Array.isArray(recentNotifications.value)) {
+            recentNotifications.value.forEach(n => {
+                if (!n.read_at) n.read_at = new Date().toISOString();
+            });
+        }
+        axios.post(route('notifications.read-all'), {}, {
+            headers: { 'Accept': 'application/json' }
+        }).catch(() => {});
+    }
+};
 
 const notificationTypeLabel = (notification) => getNotificationTypeLabel(notification);
 
@@ -250,6 +332,9 @@ onBeforeUnmount(() => {
         </Transition>
 
         <div class="min-h-screen bg-gray-50">
+            <!-- Geliştirme & Test Ortamı İçin Rol Değiştirici -->
+            <DevUserSwitcher />
+
             <!-- Modern Top Navigation -->
             <nav class="bg-white shadow-sm border-b border-gray-100 sticky top-0 z-40">
                 <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -277,9 +362,26 @@ onBeforeUnmount(() => {
 
                                 <NavLink :href="route('tasks.index')"
                                     :active="route().current('tasks.*')">
-                                    📥 İş Listem
-                                    <span v-if="pendingTasksCount > 0" class="ml-1.5 px-2 py-0.5 text-[11px] font-bold bg-rose-500 text-white rounded-full">
-                                        {{ pendingTasksCount }}
+                                    <span class="inline-flex items-center">
+                                        <span>📥 İş Listem</span>
+                                        <template v-if="taskBadgeInfo.show">
+                                            <span v-if="taskBadgeInfo.isOverdue"
+                                                class="ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full"
+                                                :class="taskBadgeInfo.classes"
+                                                :title="taskBadgeInfo.tooltip">
+                                                <span class="w-1.5 h-1.5 rounded-full" :class="taskBadgeInfo.dotClass"></span>
+                                                <span>{{ taskBadgeInfo.label }}</span>
+                                            </span>
+                                            <span v-else
+                                                class="ml-1.5 inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] rounded-full"
+                                                :class="taskBadgeInfo.classes"
+                                                :title="taskBadgeInfo.tooltip">
+                                                <span>{{ taskBadgeInfo.label }}</span>
+                                                <span v-if="taskBadgeInfo.poolLabel" class="text-[10px] text-slate-400 font-normal border-l border-slate-300 pl-1">
+                                                    {{ taskBadgeInfo.poolLabel }}
+                                                </span>
+                                            </span>
+                                        </template>
                                     </span>
                                 </NavLink>
 
@@ -295,20 +397,6 @@ onBeforeUnmount(() => {
                                         {{ myRunningProcessesCount }}
                                     </span>
                                 </NavLink>
-
-                                <NavLink :href="route('follow-ups.index')"
-                                    :active="route().current('follow-ups.*')">
-                                    ⏱️ Takipler
-                                    <span v-if="pendingFollowUpsCount > 0" class="ml-1.5 px-2 py-0.5 text-[11px] font-bold bg-purple-600 text-white rounded-full">
-                                        {{ pendingFollowUpsCount }}
-                                    </span>
-                                </NavLink>
-
-                                <NavLink v-if="hasPermission('processes.view_department')"
-                                    :href="route('processes.department')"
-                                    :active="route().current('processes.department')">
-                                    👥 Bölüm Süreçleri
-                                </NavLink>
                             </div>
                         </div>
 
@@ -318,6 +406,7 @@ onBeforeUnmount(() => {
                                 <Dropdown align="right" width="80">
                                     <template #trigger>
                                         <button type="button"
+                                            @click="handleBellClick"
                                             class="relative inline-flex items-center justify-center rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-indigo-600 focus:outline-none"
                                             aria-label="Bildirimler">
                                             <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -325,7 +414,7 @@ onBeforeUnmount(() => {
                                                     d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                                             </svg>
                                             <span v-if="hasUnreadNotifications"
-                                                class="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                                                class="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white transition-opacity">
                                                 {{ unreadNotificationsCount > 9 ? '9+' : unreadNotificationsCount }}
                                             </span>
                                         </button>
@@ -333,7 +422,10 @@ onBeforeUnmount(() => {
                                     <template #content>
                                         <div class="border-b border-gray-100 px-4 py-3">
                                             <div class="flex items-center justify-between gap-3">
-                                                <p class="text-sm font-bold text-gray-900">Bildirimler</p>
+                                                <div class="flex items-center gap-1.5">
+                                                    <p class="text-sm font-bold text-gray-900">Bildirimler</p>
+                                                    <span class="text-[10px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">✓ Güncel</span>
+                                                </div>
                                                 <Link :href="route('notifications.index')"
                                                     class="text-xs font-medium text-indigo-600 hover:text-indigo-800">
                                                     Tümünü gör
@@ -428,6 +520,7 @@ onBeforeUnmount(() => {
                                         <DropdownLink v-if="hasPermission('create_forms')"
                                             :href="route('admin.form-categories.index')">Form Kategorileri
                                         </DropdownLink>
+                                        <DropdownLink :href="route('follow-ups.index')">⏱️ Numune & Süreç Takipleri (CRM)</DropdownLink>
                                         <div class="border-t border-gray-100 my-1"></div>
                                         <div
                                             class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
@@ -506,9 +599,22 @@ onBeforeUnmount(() => {
                             :active="route().current('tasks.*')">
                             <div class="flex items-center justify-between w-full">
                                 <span>📥 İş Listem</span>
-                                <span v-if="pendingTasksCount > 0" class="px-2 py-0.5 text-xs font-bold bg-rose-500 text-white rounded-full">
-                                    {{ pendingTasksCount }}
-                                </span>
+                                <template v-if="taskBadgeInfo.show">
+                                    <span v-if="taskBadgeInfo.isOverdue"
+                                        class="px-2 py-0.5 text-xs rounded-full inline-flex items-center gap-1"
+                                        :class="taskBadgeInfo.classes">
+                                        <span class="w-1.5 h-1.5 rounded-full" :class="taskBadgeInfo.dotClass"></span>
+                                        <span>{{ taskBadgeInfo.label }}</span>
+                                    </span>
+                                    <span v-else
+                                        class="px-2 py-0.5 text-xs rounded-full inline-flex items-center gap-1"
+                                        :class="taskBadgeInfo.classes">
+                                        <span>{{ taskBadgeInfo.label }}</span>
+                                        <span v-if="taskBadgeInfo.poolLabel" class="text-[10px] opacity-70">
+                                            ({{ taskBadgeInfo.poolLabel }})
+                                        </span>
+                                    </span>
+                                </template>
                             </div>
                         </ResponsiveNavLink>
 
@@ -527,16 +633,6 @@ onBeforeUnmount(() => {
                             </div>
                         </ResponsiveNavLink>
 
-                        <ResponsiveNavLink :href="route('follow-ups.index')"
-                            :active="route().current('follow-ups.*')">
-                            <div class="flex items-center justify-between w-full">
-                                <span>⏱️ Takipler</span>
-                                <span v-if="pendingFollowUpsCount > 0" class="px-2 py-0.5 text-xs font-bold bg-purple-600 text-white rounded-full">
-                                    {{ pendingFollowUpsCount }}
-                                </span>
-                            </div>
-                        </ResponsiveNavLink>
-
                         <ResponsiveNavLink :href="route('notifications.index')"
                             :active="route().current('notifications.*')">
                             <div class="flex items-center justify-between w-full">
@@ -545,11 +641,6 @@ onBeforeUnmount(() => {
                                     {{ unreadNotificationsCount }}
                                 </span>
                             </div>
-                        </ResponsiveNavLink>
-
-                        <ResponsiveNavLink v-if="hasPermission('processes.view_department')"
-                            :href="route('processes.department')" :active="route().current('processes.department')">
-                            👥 Bölüm Süreçleri
                         </ResponsiveNavLink>
                     </div>
 

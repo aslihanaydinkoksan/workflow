@@ -48,21 +48,56 @@ class TaskVisibility
         return self::queryForUser($user)->whereKey($task->id)->exists();
     }
 
+    public static function personalPendingCountForUser(User $user): int
+    {
+        $user->loadMissing('roles');
+
+        if ($user->hasRole('Admin') || $user->hasRole('superadmin')) {
+            return Task::where('status', 'pending')
+                ->where('assigned_to', $user->id)
+                ->count();
+        }
+
+        return self::queryForUser($user)
+            ->where('status', 'pending')
+            ->count();
+    }
+
+    public static function overdueCountForUser(User $user): int
+    {
+        $user->loadMissing('roles');
+
+        $query = ($user->hasRole('Admin') || $user->hasRole('superadmin'))
+            ? Task::query()->where('assigned_to', $user->id)
+            : self::queryForUser($user);
+
+        return $query
+            ->where('status', 'pending')
+            ->whereNotNull('due_date')
+            ->where('due_date', '<', now())
+            ->count();
+    }
+
+    public static function totalPoolCount(): int
+    {
+        return Task::where('status', 'pending')->count();
+    }
+
     public static function pendingCountForUser(User $user): int
     {
-        return self::queryForUser($user)->where('status', 'pending')->count();
+        return self::personalPendingCountForUser($user);
     }
 
     public static function pendingNoticeMessageForUser(User $user): ?string
     {
-        $count = self::pendingCountForUser($user);
+        $count = self::personalPendingCountForUser($user);
 
         if ($count < 1) {
             return null;
         }
 
         return $count === 1
-            ? 'Bekleyen göreviniz mevcuttur.'
-            : "{$count} adet bekleyen göreviniz mevcuttur.";
+            ? 'Bekleyen 1 kişisel göreviniz mevcuttur.'
+            : "{$count} adet bekleyen kişisel göreviniz mevcuttur.";
     }
 }

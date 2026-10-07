@@ -45,4 +45,19 @@ class ProcessInstance extends Model
     {
         return $this->hasOne(FollowUp::class)->latestOfMany();
     }
+
+    public function terminRevisions()
+    {
+        return $this->hasMany(TerminRevision::class)->latest();
+    }
+
+    public function latestTerminRevision()
+    {
+        return $this->hasOne(TerminRevision::class)->latestOfMany();
+    }
+
+    public function fieldAudits()
+    {
+        return $this->hasMany(ProcessFieldAudit::class)->latest();
+    }
 }

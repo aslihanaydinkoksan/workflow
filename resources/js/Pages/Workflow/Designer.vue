@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, nextTick, provide } from 'vue';
-import { Head, useForm } from '@inertiajs/vue3';
+import { Head, useForm, router } from '@inertiajs/vue3';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { VueFlow, useVueFlow, Handle } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
@@ -23,6 +23,10 @@ const props = defineProps({
     workflow: {
         type: Object,
         default: null,
+    },
+    workflowVersions: {
+        type: Array,
+        default: () => [],
     },
     forms: {
         type: Array,
@@ -74,9 +78,13 @@ const { addNodes, setNodes, setEdges, dimensions, project, vueFlowRef, onConnect
     }
 });
 
-// forms listesini çocuk düğüm bileşenlerine aktar (BaseNode inject ile alacak)
+// forms, departmanlar ve kullanıcılar listesini çocuk düğüm bileşenlerine aktar (BaseNode inject ile alacak)
 const formsRef = computed(() => props.forms);
 provide('formsList', formsRef);
+const departmentsRef = computed(() => props.departments);
+provide('departmentsList', departmentsRef);
+const usersRef = computed(() => props.users);
+provide('usersList', usersRef);
 
 const elements = ref([
     { id: '1', type: 'start', position: { x: 250, y: 5 }, data: { label: 'Başlangıç' } }
@@ -87,6 +95,8 @@ onMounted(() => {
         form.nodes.forEach((node) => {
             ensureScheduleDefaults(node);
             ensureRejectDefaults(node);
+            ensureAssigneeDefaults(node);
+            ensureBoundaryTimerDefaults(node);
         });
         setNodes(form.nodes);
         setEdges(form.edges);
@@ -104,6 +114,8 @@ const temelNodeTypes = [
     { type: 'start', label: 'Başlangıç', bgColor: '#10b981', description: 'Süreci başlatır', taskType: 'start', iconLetter: '▶' },
     { type: 'io', label: 'Form Görevi', bgColor: '#3b82f6', description: 'Personele form doldurma görevi atar', taskType: 'form', iconLetter: '📋' },
     { type: 'decision', label: 'Onay Mekanizması', bgColor: '#f59e0b', description: 'Yönetici onayına sunar (Termin zorunluluğu destekler)', taskType: 'approval', iconLetter: '✓' },
+    { type: 'decision', label: 'Paralel Dallanma (AND-Fork)', bgColor: '#6366f1', description: 'Akışı aynı anda birden fazla paralel kola böler (BPMN 2.0)', taskType: 'parallel_fork', iconLetter: '🔀' },
+    { type: 'decision', label: 'Paralel Birleşme (AND-Join)', bgColor: '#4f46e5', description: 'Tüm paralel kollar tamamlanana kadar bekler ve senkronize eder (BPMN 2.0)', taskType: 'parallel_join', iconLetter: '🔗' },
     { type: 'io', label: 'Süreç Takibi', bgColor: '#0284c7', description: 'Belirlenen gün sonra satışçıya "Siparişe döndü mü?" takibi başlatır', taskType: 'follow_up', iconLetter: '⏱' },
     { type: 'task', label: 'İnceleme (Bilgi)', bgColor: '#8b5cf6', description: 'Sadece bilgilendirir', taskType: 'review', iconLetter: '👁' },
     { type: 'decision', label: 'Sistem Kararı (Kural)', bgColor: '#ec4899', description: 'Kurallara göre otomatik yönlendirir', taskType: 'system_rule', iconLetter: '⚙' },
@@ -145,12 +157,25 @@ const openSettings = (id) => {
     if (node) {
         ensureScheduleDefaults(node);
         ensureRejectDefaults(node);
+        ensureAssigneeDefaults(node);
+        ensureBoundaryTimerDefaults(node);
     }
     selectedNodeForSettings.value = node ?? null;
     settingsTab.value = 'general';
 };
 
 const isHumanTaskNode = (node) => node && humanTaskTypes.includes(node.data?.taskType);
+
+const ensureBoundaryTimerDefaults = (node) => {
+    if (!node?.data) return;
+    if (!node.data.boundaryTimer) {
+        node.data.boundaryTimer = {
+            enabled: false,
+            duration_hours: 24,
+            action: 'auto_escalate'
+        };
+    }
+};
 
 const ensureScheduleDefaults = (node) => {
     if (!node?.data || !isHumanTaskNode(node)) {
@@ -202,6 +227,52 @@ const ensureRejectDefaults = (node) => {
 
     if (node.data.rejectEnabled === undefined) {
         node.data.rejectEnabled = node.data.taskType !== 'form';
+    }
+};
+
+const ensureAssigneeDefaults = (node) => {
+    if (!node?.data) return;
+    if (!node.data.deptManagerType) {
+        node.data.deptManagerType = 'manager';
+    }
+    if (node.data.assignedUserId === undefined) {
+        node.data.assignedUserId = '';
+    }
+    if (!Array.isArray(node.data.assignedUserIds)) {
+        node.data.assignedUserIds = node.data.assignedUserId ? [node.data.assignedUserId] : [];
+    }
+    if (!node.data.approvalPolicy) {
+        node.data.approvalPolicy = 'any';
+    }
+};
+
+const currentDepartmentUsers = computed(() => {
+    if (!selectedNodeForSettings.value?.data?.assignValue) return [];
+    const deptId = selectedNodeForSettings.value.data.assignValue;
+    
+    // 1. Departmanın birincil kullanıcıları (users tablosundan department_id eşleşenler)
+    const primaryUsers = (props.users || []).filter(u => u.department_id == deptId);
+    
+    // 2. department_managers ilişkisinden gelen yöneticiler
+    const deptObj = (props.departments || []).find(d => d.id == deptId);
+    const managerUsers = deptObj?.all_managers || [];
+    
+    // Birleştir ve tekilleştir (id'ye göre)
+    const userMap = new Map();
+    primaryUsers.forEach(u => userMap.set(u.id, u));
+    managerUsers.forEach(u => {
+        if (!userMap.has(u.id)) {
+            userMap.set(u.id, u);
+        }
+    });
+    
+    return Array.from(userMap.values());
+});
+
+const onDepartmentChanged = () => {
+    if (selectedNodeForSettings.value?.data) {
+        selectedNodeForSettings.value.data.assignedUserId = '';
+        selectedNodeForSettings.value.data.assignedUserIds = [];
     }
 };
 
@@ -279,8 +350,14 @@ const onDrop = (event) => {
     if (['approval', 'review'].includes(nodeData.taskType)) {
         baseData.assignType = 'hierarchy';
         baseData.assignValue = 'manager_1';
+        baseData.deptManagerType = 'manager';
+        baseData.assignedUserId = '';
+        baseData.assignedUserIds = [];
+        baseData.approvalPolicy = 'any';
         baseData.description = '';
+        baseData.subFormId = '';
         baseData.rejectEnabled = true;
+        baseData.requireTermin = false;
         baseData.requireFieldOnApprove = false;
         baseData.requiredFieldName = '';
         baseData.requiredFieldErrorMessage = '';
@@ -291,6 +368,8 @@ const onDrop = (event) => {
         baseData.subFormId = '';
         baseData.assignType = 'starter';
         baseData.assignValue = '';
+        baseData.deptManagerType = 'manager';
+        baseData.assignedUserId = '';
         baseData.description = '';
     }
 
@@ -362,6 +441,53 @@ const saveWorkflow = (status = 'active') => {
         form.post(route('workflows.store'));
     }
 };
+
+// Zero-Downtime Versiyonlama ve Canlı Yayınlama
+const isPublishVersionModalOpen = ref(false);
+const publishVersionNotes = ref('');
+const isPublishingVersion = ref(false);
+
+const openPublishVersionModal = () => {
+    publishVersionNotes.value = '';
+    isPublishVersionModalOpen.value = true;
+};
+
+const publishNewVersion = () => {
+    if (!props.workflow) return;
+    isPublishingVersion.value = true;
+
+    const payloadNodes = getNodes.value.map(n => ({ id: n.id, type: n.type, position: n.position, label: n.label, style: n.style, data: n.data }));
+    const payloadEdges = getEdges.value.map(e => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle }));
+
+    router.post(route('workflows.publish-version', props.workflow.id), {
+        name: form.name,
+        description: form.description,
+        form_template_id: form.form_template_id,
+        valid_from: form.valid_from,
+        valid_until: form.valid_until,
+        category: form.category,
+        allowed_departments: form.allowed_departments,
+        allowed_roles: form.allowed_roles,
+        allowed_users: form.allowed_users,
+        nodes: payloadNodes,
+        edges: payloadEdges,
+        status: 'active',
+        auto_start_process: true,
+        version_notes: publishVersionNotes.value || 'Yeni süreç versiyonu yayınlandı.',
+    }, {
+        onFinish: () => {
+            isPublishingVersion.value = false;
+            isPublishVersionModalOpen.value = false;
+        }
+    });
+};
+
+const switchWorkflowVersion = (versionId) => {
+    if (versionId && Number(versionId) !== Number(props.workflow?.id)) {
+        router.visit(route('workflows.edit', versionId));
+    }
+};
+
 const isRuleModalOpen = ref(false);
 </script>
 
@@ -383,17 +509,61 @@ const isRuleModalOpen = ref(false);
                                 <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>
                             </svg>
                         </button>
-                        <button @click="saveWorkflow('active')" class="text-teal-200 hover:text-white pb-1 transition-colors">YAYINLA</button>
+                    </div>
+
+                    <!-- Versiyon Rozeti ve Aile Seçicisi -->
+                    <div v-if="workflow" class="flex items-center gap-2 pl-4 border-l border-teal-500/40">
+                        <div class="flex items-center gap-1.5 bg-teal-900/60 px-2.5 py-1 rounded-lg border border-teal-400/30">
+                            <span class="text-xs text-teal-300 font-medium">Sürüm:</span>
+                            <span class="text-xs font-mono font-bold text-white bg-teal-700/80 px-1.5 py-0.5 rounded">v{{ workflow.version || 1 }}.0</span>
+                            <span v-if="workflow.is_latest" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 font-semibold">Son Sürüm</span>
+                            <span v-else class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/30 text-amber-200 border border-amber-400/40 font-semibold">Eski Sürüm</span>
+                        </div>
+
+                        <!-- Versiyon Değiştirme Dropdown -->
+                        <div v-if="workflowVersions && workflowVersions.length > 1" class="relative">
+                            <select 
+                                @change="switchWorkflowVersion($event.target.value)" 
+                                :value="workflow.id"
+                                class="bg-teal-900/80 border border-teal-400/30 text-xs text-white rounded-lg px-2 py-1 pr-6 focus:ring-1 focus:ring-teal-300 cursor-pointer"
+                                title="Farklı bir versiyonu görüntüle/düzenle"
+                            >
+                                <option v-for="ver in workflowVersions" :key="ver.id" :value="ver.id">
+                                    v{{ ver.version }}.0 {{ ver.is_latest ? '(Son Sürüm)' : '' }} - {{ ver.created_at }}
+                                </option>
+                            </select>
+                        </div>
                     </div>
                 </div>
                 
                 <div class="flex flex-col items-end space-y-1 mt-4 md:mt-0">
-                    <div class="flex items-center space-x-3">
-                        <span class="text-sm mr-2 text-green-300">
-                            Kayıt = yayınla + süreci başlat
+                    <div class="flex items-center space-x-2">
+                        <span class="text-xs mr-2 text-teal-100 hidden sm:inline">
+                            {{ workflow ? 'Zero-Downtime Versiyonlama Aktif' : 'Kayıt = yayınla + süreci başlat' }}
                         </span>
-                        <button @click="saveWorkflow('active')" :disabled="form.processing" class="bg-white text-teal-700 hover:bg-gray-100 font-bold py-1.5 px-6 rounded shadow transition-colors text-sm">
-                            {{ form.processing ? 'Kaydediliyor...' : 'Kaydet ve Yayınla' }}
+                        
+                        <!-- Mevcut Versiyonu Güncelle -->
+                        <button 
+                            @click="saveWorkflow('active')" 
+                            :disabled="form.processing" 
+                            class="bg-white/90 hover:bg-white text-teal-800 font-bold py-1.5 px-4 rounded shadow transition-colors text-xs flex items-center gap-1.5"
+                            :title="workflow ? 'Mevcut versiyon şemasını günceller' : 'Yeni akışı kaydeder ve yayına alır'"
+                        >
+                            <svg class="w-3.5 h-3.5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+                            <span>{{ form.processing ? 'Kaydediliyor...' : (workflow ? 'Mevcut Sürümü Kaydet' : 'Kaydet ve Yayınla') }}</span>
+                        </button>
+
+                        <!-- Yeni Versiyon Olarak Yayınla (Zero-Downtime v+1) -->
+                        <button 
+                            v-if="workflow"
+                            type="button"
+                            @click="openPublishVersionModal" 
+                            :disabled="isPublishingVersion" 
+                            class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold py-1.5 px-4 rounded shadow-md transition-all text-xs flex items-center gap-1.5 border border-purple-400/40"
+                            title="Eski versiyonu ve canlı talepleri bozmadan v+1 yeni versiyon üretir"
+                        >
+                            <span>✨</span>
+                            <span>Yeni Versiyon Yayınla (v{{ (workflow.version || 1) + 1 }}.0)</span>
                         </button>
                     </div>
                 </div>
@@ -556,6 +726,9 @@ const isRuleModalOpen = ref(false);
                     <template #node-end="props">
                         <EndNode :id="props.id" :data="props.data" @openSettings="openSettings" @duplicate="duplicateNode" @remove="removeNode" />
                     </template>
+                    <template #node-output="props">
+                        <EndNode :id="props.id" :data="props.data" @openSettings="openSettings" @duplicate="duplicateNode" @remove="removeNode" />
+                    </template>
                     <template #node-task="props">
                         <TaskNode :id="props.id" :data="props.data" @openSettings="openSettings" @duplicate="duplicateNode" @remove="removeNode" />
                     </template>
@@ -563,6 +736,9 @@ const isRuleModalOpen = ref(false);
                         <IONode :id="props.id" :data="props.data" @openSettings="openSettings" @duplicate="duplicateNode" @remove="removeNode" />
                     </template>
                     <template #node-decision="props">
+                        <DecisionNode :id="props.id" :data="props.data" @openSettings="openSettings" @duplicate="duplicateNode" @remove="removeNode" />
+                    </template>
+                    <template #node-approval="props">
                         <DecisionNode :id="props.id" :data="props.data" @openSettings="openSettings" @duplicate="duplicateNode" @remove="removeNode" />
                     </template>
                     <template #node-storage="props">
@@ -621,7 +797,14 @@ const isRuleModalOpen = ref(false);
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                                 KURALLARI YÖNET
                             </button>
-                            <p v-else class="text-[10px] text-red-400 mt-2 font-semibold">Kuralları yazabilmek için önce akışı kaydedip yayınlamalısınız.</p>
+                            <div v-else class="p-3 bg-pink-950/40 border border-pink-500/30 rounded-lg text-xs text-pink-200">
+                                <p class="font-semibold text-pink-300 mb-1 flex items-center gap-1.5">
+                                    <span>💡</span> Akış Henüz Kaydedilmedi
+                                </p>
+                                <p class="text-[10px] text-pink-200/80 leading-relaxed">
+                                    Kural motoru veritabanındaki akış kimliğine (ID) bağlı çalışır. Akışınızı sağ üstteki <strong>"Kaydet ve Yayınla"</strong> butonuyla bir defa kaydettikten sonra akış düzenleme ekranında kurallarınızı tanımlayabilirsiniz.
+                                </p>
+                            </div>
                         </div>
 
                         <!-- Görev açıklaması (atanan kişi Görevlerim'de görür) -->
@@ -651,16 +834,139 @@ const isRuleModalOpen = ref(false);
                                 <label class="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Atanan Kişi</label>
                                 <select v-model="selectedNodeForSettings.data.assignType" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
                                     <option value="starter">Süreci Başlatan Kişi</option>
+                                    <option value="department">Belirli Bir Departman Yetkilisi / Amiri</option>
                                     <option value="user">Belirli Bir Kullanıcı</option>
                                     <option value="role">Belirli Bir Rol</option>
                                 </select>
 
-                                <div v-if="selectedNodeForSettings.data.assignType === 'user'" class="mt-2">
-                                    <label class="block text-[10px] text-gray-400 mb-1">Kullanıcı Seçin</label>
-                                    <select v-model="selectedNodeForSettings.data.assignValue" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
-                                        <option value="">-- Kullanıcı Seçin --</option>
-                                        <option v-for="user in users" :key="user.id" :value="user.id">{{ user.name }}</option>
-                                    </select>
+                                <div v-if="selectedNodeForSettings.data.assignType === 'department'" class="mt-2 space-y-3">
+                                    <div>
+                                        <label class="block text-[10px] text-gray-400 mb-1">Departman Seçin</label>
+                                        <select 
+                                            v-model="selectedNodeForSettings.data.assignValue" 
+                                            @change="onDepartmentChanged"
+                                            class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2"
+                                        >
+                                            <option value="">-- Departman Seçiniz --</option>
+                                            <option v-for="dept in departments" :key="dept.id" :value="dept.id">{{ dept.name }}</option>
+                                        </select>
+                                    </div>
+
+                                    <div v-if="selectedNodeForSettings.data.assignValue" class="space-y-2 bg-[#1e293b]/70 p-3 rounded-lg border border-[#334155]">
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-teal-400 mb-1 flex items-center justify-between">
+                                                <span>Hangi Yönetici / Amir?</span>
+                                                <span class="text-[9px] text-gray-400 font-normal">Tek Yetkili</span>
+                                            </label>
+                                            <select 
+                                                v-model="selectedNodeForSettings.data.deptManagerType" 
+                                                class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2"
+                                            >
+                                                <optgroup label="🏢 Kadro / Görev Kademesine Göre (Tek Yetkili)">
+                                                    <option value="manager">👔 Departman Müdürü (Genel / Asil)</option>
+                                                    <option value="assistant_manager">🥈 Departman Müdür Yardımcısı</option>
+                                                    <option value="chief">👷 İşletme Şefi / Birim Amiri</option>
+                                                </optgroup>
+                                                <optgroup label="👥 Kadro Bazlı Çoklu Atama (Tüm Kademeler)">
+                                                    <option value="all_managers">👔 Departmandaki Tüm Müdürler & Yrd. (Çoklu)</option>
+                                                    <option value="all_chiefs">👷 Departmandaki Tüm İşletme Şefleri / Amirler (Çoklu)</option>
+                                                </optgroup>
+                                                <optgroup label="👤 Departmandan Doğrudan Kişi(ler) Seç">
+                                                    <option value="specific_user">🎯 Tek Personel / Yetkili Seç (İsimle)</option>
+                                                    <option value="specific_users">👥 Birden Fazla Personel / Yetkili Seç (Çoklu)</option>
+                                                </optgroup>
+                                            </select>
+                                        </div>
+
+                                        <!-- Tekil Kişi Seçimi -->
+                                        <div v-if="selectedNodeForSettings.data.deptManagerType === 'specific_user'" class="pt-2 border-t border-[#334155]">
+                                            <label class="block text-[10px] font-semibold text-amber-300 mb-1">
+                                                Departman Yetkilisi / Personeli
+                                            </label>
+                                            <select 
+                                                v-if="currentDepartmentUsers.length > 0"
+                                                v-model="selectedNodeForSettings.data.assignedUserId" 
+                                                class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-amber-500 px-3 py-2"
+                                            >
+                                                <option value="">-- Personel Seçiniz --</option>
+                                                <option v-for="u in currentDepartmentUsers" :key="u.id" :value="u.id">
+                                                    {{ u.name }} — {{ u.title || 'Yetkili' }}
+                                                </option>
+                                            </select>
+                                            <div v-else class="space-y-1">
+                                                <p class="text-[10px] text-amber-200/90 bg-amber-950/40 p-2 rounded border border-amber-500/30">
+                                                    ℹ Bu departmana doğrudan bağlı personel bulunamadı. Şirket genelinden atama yapabilirsiniz:
+                                                </p>
+                                                <select 
+                                                    v-model="selectedNodeForSettings.data.assignedUserId" 
+                                                    class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-amber-500 px-3 py-2"
+                                                >
+                                                    <option value="">-- Tüm Personellerden Seç --</option>
+                                                    <option v-for="u in users" :key="u.id" :value="u.id">
+                                                        {{ u.name }} ({{ u.title || 'Personel' }})
+                                                    </option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <!-- Çoklu Kişi Seçimi (specific_users) -->
+                                        <div v-if="selectedNodeForSettings.data.deptManagerType === 'specific_users'" class="pt-2 border-t border-[#334155]">
+                                            <div class="flex items-center justify-between mb-1">
+                                                <label class="block text-[10px] font-semibold text-amber-300">
+                                                    Departman Yetkilileri / Personeli (Çoklu)
+                                                </label>
+                                                <span class="text-[9px] text-amber-400 font-mono">
+                                                    {{ selectedNodeForSettings.data.assignedUserIds?.length || 0 }} kişi seçili
+                                                </span>
+                                            </div>
+                                            <div class="max-h-36 overflow-y-auto bg-[#0f172a]/70 rounded p-2 border border-amber-500/30 space-y-1">
+                                                <label 
+                                                    v-for="u in (currentDepartmentUsers.length > 0 ? currentDepartmentUsers : users)" 
+                                                    :key="u.id" 
+                                                    class="flex items-center gap-2 text-xs text-gray-200 hover:bg-[#1e293b] p-1 rounded cursor-pointer"
+                                                >
+                                                    <input 
+                                                        type="checkbox" 
+                                                        :value="u.id" 
+                                                        v-model="selectedNodeForSettings.data.assignedUserIds"
+                                                        class="rounded border-gray-600 bg-[#334155] text-amber-500 focus:ring-amber-500"
+                                                    />
+                                                    <span class="truncate">{{ u.name }} — {{ u.title || 'Yetkili' }}</span>
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        <div class="mt-2 p-2 rounded bg-emerald-950/30 border border-emerald-500/30 text-[10px] text-emerald-300 flex items-start gap-1.5">
+                                            <span class="text-xs">🛡</span>
+                                            <span class="leading-tight">
+                                                <strong>Hedefli Bildirim:</strong>
+                                                Görev ve e-posta bildirimleri yalnızca yukarıda belirlenen yetkili(ler)e iletilir.
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-else-if="selectedNodeForSettings.data.assignType === 'user'" class="mt-2 space-y-2">
+                                    <div class="flex items-center justify-between">
+                                        <label class="block text-[10px] text-gray-400">Hedef Kullanıcı(lar)ı Seçin</label>
+                                        <span class="text-[9px] text-teal-400 font-mono">
+                                            {{ selectedNodeForSettings.data.assignedUserIds?.length || (selectedNodeForSettings.data.assignValue ? 1 : 0) }} kişi seçili
+                                        </span>
+                                    </div>
+                                    <div class="max-h-40 overflow-y-auto bg-[#0f172a]/70 rounded p-2 border border-[#334155] space-y-1">
+                                        <label 
+                                            v-for="user in users" 
+                                            :key="user.id" 
+                                            class="flex items-center gap-2 text-xs text-gray-200 hover:bg-[#1e293b] p-1 rounded cursor-pointer"
+                                        >
+                                            <input 
+                                                type="checkbox" 
+                                                :value="user.id" 
+                                                v-model="selectedNodeForSettings.data.assignedUserIds"
+                                                class="rounded border-gray-600 bg-[#334155] text-teal-500 focus:ring-teal-500"
+                                            />
+                                            <span class="truncate">{{ user.name }} ({{ user.title || 'Kullanıcı' }})</span>
+                                        </label>
+                                    </div>
                                 </div>
                                 <div v-else-if="selectedNodeForSettings.data.assignType === 'role'" class="mt-2">
                                     <label class="block text-[10px] text-gray-400 mb-1">Rol Seçin</label>
@@ -706,26 +1012,195 @@ const isRuleModalOpen = ref(false);
                                         <option value="manager_2">2. Amir (Yöneticinin Yöneticisi)</option>
                                     </select>
                                 </div>
-                                <div v-else-if="selectedNodeForSettings.data.assignType === 'department'">
-                                    <select v-model="selectedNodeForSettings.data.assignValue" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
-                                        <option v-for="dept in departments" :key="dept.id" :value="dept.id">{{ dept.name }}</option>
-                                    </select>
+                                <div v-else-if="selectedNodeForSettings.data.assignType === 'department'" class="space-y-3">
+                                    <div>
+                                        <label class="block text-[11px] font-semibold text-gray-300 mb-1">Hedef Departman</label>
+                                        <select 
+                                            v-model="selectedNodeForSettings.data.assignValue" 
+                                            @change="onDepartmentChanged"
+                                            class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2"
+                                        >
+                                            <option value="">-- Departman Seçiniz --</option>
+                                            <option v-for="dept in departments" :key="dept.id" :value="dept.id">{{ dept.name }}</option>
+                                        </select>
+                                    </div>
+
+                                    <div v-if="selectedNodeForSettings.data.assignValue" class="space-y-2 bg-[#1e293b]/70 p-3 rounded-lg border border-[#334155]">
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-teal-400 mb-1 flex items-center justify-between">
+                                                <span>Hangi Yönetici / Amir?</span>
+                                                <span class="text-[9px] text-gray-400 font-normal">Tek Yetkili</span>
+                                            </label>
+                                            <select 
+                                                v-model="selectedNodeForSettings.data.deptManagerType" 
+                                                class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2"
+                                            >
+                                                <optgroup label="🏢 Kadro / Görev Kademesine Göre (Tek Yetkili)">
+                                                    <option value="manager">👔 Departman Müdürü (Genel / Asil)</option>
+                                                    <option value="assistant_manager">🥈 Departman Müdür Yardımcısı</option>
+                                                    <option value="chief">👷 İşletme Şefi / Birim Amiri</option>
+                                                </optgroup>
+                                                <optgroup label="👥 Kadro Bazlı Çoklu Atama (Tüm Kademeler)">
+                                                    <option value="all_managers">👔 Departmandaki Tüm Müdürler & Yrd. (Çoklu)</option>
+                                                    <option value="all_chiefs">👷 Departmandaki Tüm İşletme Şefleri / Amirler (Çoklu)</option>
+                                                </optgroup>
+                                                <optgroup label="👤 Departmandan Doğrudan Kişi(ler) Seç">
+                                                    <option value="specific_user">🎯 Tek Personel / Yetkili Seç (İsimle)</option>
+                                                    <option value="specific_users">👥 Birden Fazla Personel / Yetkili Seç (Çoklu)</option>
+                                                </optgroup>
+                                            </select>
+                                        </div>
+
+                                        <!-- specific_user seçildiğinde (Tekil) -->
+                                        <div v-if="selectedNodeForSettings.data.deptManagerType === 'specific_user'" class="pt-2 border-t border-[#334155]">
+                                            <label class="block text-[10px] font-semibold text-amber-300 mb-1">
+                                                Departman Yetkilisi / Personeli
+                                            </label>
+                                            <select 
+                                                v-if="currentDepartmentUsers.length > 0"
+                                                v-model="selectedNodeForSettings.data.assignedUserId" 
+                                                class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-amber-500 px-3 py-2"
+                                            >
+                                                <option value="">-- Personel Seçiniz --</option>
+                                                <option v-for="u in currentDepartmentUsers" :key="u.id" :value="u.id">
+                                                    {{ u.name }} — {{ u.title || 'Yetkili' }}
+                                                </option>
+                                            </select>
+                                            <div v-else class="space-y-1">
+                                                <p class="text-[10px] text-amber-200/90 bg-amber-950/40 p-2 rounded border border-amber-500/30">
+                                                    ℹ Bu departmana doğrudan bağlı personel bulunamadı. Şirket genelinden atama yapabilirsiniz:
+                                                </p>
+                                                <select 
+                                                    v-model="selectedNodeForSettings.data.assignedUserId" 
+                                                    class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-amber-500 px-3 py-2"
+                                                >
+                                                    <option value="">-- Tüm Personellerden Seç --</option>
+                                                    <option v-for="u in users" :key="u.id" :value="u.id">
+                                                        {{ u.name }} ({{ u.title || 'Personel' }})
+                                                    </option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <!-- specific_users seçildiğinde (Çoklu Personel Seçimi) -->
+                                        <div v-if="selectedNodeForSettings.data.deptManagerType === 'specific_users'" class="pt-2 border-t border-[#334155]">
+                                            <div class="flex items-center justify-between mb-1">
+                                                <label class="block text-[10px] font-semibold text-amber-300">
+                                                    Departman Yetkilileri / Personeli (Çoklu)
+                                                </label>
+                                                <span class="text-[9px] text-amber-400 font-mono">
+                                                    {{ selectedNodeForSettings.data.assignedUserIds?.length || 0 }} kişi seçili
+                                                </span>
+                                            </div>
+                                            <div class="max-h-36 overflow-y-auto bg-[#0f172a]/70 rounded p-2 border border-amber-500/30 space-y-1">
+                                                <label 
+                                                    v-for="u in (currentDepartmentUsers.length > 0 ? currentDepartmentUsers : users)" 
+                                                    :key="u.id" 
+                                                    class="flex items-center gap-2 text-xs text-gray-200 hover:bg-[#1e293b] p-1 rounded cursor-pointer"
+                                                >
+                                                    <input 
+                                                        type="checkbox" 
+                                                        :value="u.id" 
+                                                        v-model="selectedNodeForSettings.data.assignedUserIds"
+                                                        class="rounded border-gray-600 bg-[#334155] text-amber-500 focus:ring-amber-500"
+                                                    />
+                                                    <span class="truncate">{{ u.name }} — {{ u.title || 'Yetkili' }}</span>
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        <!-- Hedefli Bildirim Güvencesi -->
+                                        <div class="mt-2 p-2 rounded bg-emerald-950/30 border border-emerald-500/30 text-[10px] text-emerald-300 flex items-start gap-1.5">
+                                            <span class="text-xs">🛡</span>
+                                            <span class="leading-tight">
+                                                <strong>Hedefli Bildirim:</strong>
+                                                Görev ve e-posta bildirimleri yalnızca yukarıda belirlenen yetkili(ler)e iletilir.
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div v-else-if="selectedNodeForSettings.data.assignType === 'directorate'">
                                     <select v-model="selectedNodeForSettings.data.assignValue" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
                                         <option v-for="dir in directorates" :key="dir.id" :value="dir.id">{{ dir.name }}</option>
                                     </select>
                                 </div>
-                                <div v-else-if="selectedNodeForSettings.data.assignType === 'user'">
-                                    <select v-model="selectedNodeForSettings.data.assignValue" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
-                                        <option v-for="user in users" :key="user.id" :value="user.id">{{ user.name }}</option>
-                                    </select>
+                                <div v-else-if="selectedNodeForSettings.data.assignType === 'user'" class="space-y-2">
+                                    <div class="flex items-center justify-between">
+                                        <label class="block text-[10px] text-gray-400">Hedef Kullanıcı(lar)ı Seçin (Tekli / Çoklu)</label>
+                                        <span class="text-[9px] text-teal-400 font-mono">
+                                            {{ selectedNodeForSettings.data.assignedUserIds?.length || (selectedNodeForSettings.data.assignValue ? 1 : 0) }} kişi seçili
+                                        </span>
+                                    </div>
+                                    <div class="max-h-40 overflow-y-auto bg-[#0f172a]/70 rounded p-2 border border-[#334155] space-y-1">
+                                        <label 
+                                            v-for="user in users" 
+                                            :key="user.id" 
+                                            class="flex items-center gap-2 text-xs text-gray-200 hover:bg-[#1e293b] p-1.5 rounded cursor-pointer transition-colors"
+                                        >
+                                            <input 
+                                                type="checkbox" 
+                                                :value="user.id" 
+                                                v-model="selectedNodeForSettings.data.assignedUserIds"
+                                                class="rounded border-gray-600 bg-[#334155] text-teal-500 focus:ring-teal-500"
+                                            />
+                                            <span class="truncate">{{ user.name }} ({{ user.title || 'Kullanıcı' }})</span>
+                                        </label>
+                                    </div>
                                 </div>
                                 <div v-else-if="selectedNodeForSettings.data.assignType === 'role'">
                                     <select v-model="selectedNodeForSettings.data.assignValue" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
                                         <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
                                     </select>
                                 </div>
+
+                                <!-- ========== ONAY KARAR POLİTİKASI (ÇOKLU ONAY / KONSENSÜS / HAVUZ) ========== -->
+                                <div class="pt-3 border-t border-[#334155]">
+                                    <label class="block text-xs font-semibold text-teal-400 mb-1 uppercase tracking-wider">
+                                        👥 Onay Karar Politikası (Çoklu Yetkili)
+                                    </label>
+                                    <p class="text-[10px] text-gray-400 mb-2">
+                                        Birden fazla kişi veya rol atandığında onay akış kuralını belirleyin:
+                                    </p>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <label 
+                                            class="flex flex-col p-2.5 rounded-lg border cursor-pointer transition-all text-xs"
+                                            :class="selectedNodeForSettings.data.approvalPolicy !== 'all' 
+                                                ? 'bg-teal-950/60 border-teal-500 text-teal-200 shadow-sm' 
+                                                : 'bg-[#1e293b] border-gray-700 text-gray-400 hover:border-gray-600'"
+                                        >
+                                            <div class="flex items-center gap-1.5 font-bold mb-1">
+                                                <input type="radio" value="any" v-model="selectedNodeForSettings.data.approvalPolicy" class="text-teal-500 focus:ring-0" />
+                                                <span>⚡ İlk Onaylayan Yeterli</span>
+                                            </div>
+                                            <span class="text-[10px] text-gray-400 font-normal leading-tight">
+                                                Vardiya / havuz modeli. Atanan kişilerden herhangi biri onaylayınca süreç hemen ilerler, diğer görevler otomatik iptal edilir.
+                                            </span>
+                                        </label>
+                                        <label 
+                                            class="flex flex-col p-2.5 rounded-lg border cursor-pointer transition-all text-xs"
+                                            :class="selectedNodeForSettings.data.approvalPolicy === 'all' 
+                                                ? 'bg-indigo-950/60 border-indigo-500 text-indigo-200 shadow-sm' 
+                                                : 'bg-[#1e293b] border-gray-700 text-gray-400 hover:border-gray-600'"
+                                        >
+                                            <div class="flex items-center gap-1.5 font-bold mb-1">
+                                                <input type="radio" value="all" v-model="selectedNodeForSettings.data.approvalPolicy" class="text-indigo-500 focus:ring-0" />
+                                                <span>🤝 Tümünün Onayı Şart</span>
+                                            </div>
+                                            <span class="text-[10px] text-gray-400 font-normal leading-tight">
+                                                Konsensüs modeli. Atanan tüm yetkililerin tek tek onay vermesi şarttır. Herkes onay verene kadar süreç bekler.
+                                            </span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider mt-2">Bağlı Form (Opsiyonel)</label>
+                                <p class="text-[10px] text-gray-500 mb-2">Onay makamının dolduracağı formu seçin (Örn: FR-LVH-02 İşletme Kabul ve Termin Bildirim Formu).</p>
+                                <select v-model="selectedNodeForSettings.data.subFormId" class="w-full bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-teal-500 px-3 py-2">
+                                    <option value="">-- Standart Dahili Onay (Formsuz) --</option>
+                                    <option v-for="f in forms" :key="f.id" :value="f.id">{{ f.name }}</option>
+                                </select>
                             </div>
 
                             <div class="pt-2 border-t border-[#334155]">
@@ -742,6 +1217,23 @@ const isRuleModalOpen = ref(false);
                                 </p>
                             </div>
 
+                            <!-- İşletme Termin Zorunluluğu (requireTermin) -->
+                            <div class="pt-3 border-t border-[#334155]">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        v-model="selectedNodeForSettings.data.requireTermin"
+                                        type="checkbox"
+                                        class="rounded border-gray-500 bg-[#334155] text-amber-500 focus:ring-amber-500"
+                                    />
+                                    <span class="text-sm text-amber-300 font-semibold flex items-center gap-1.5">
+                                        📅 İşletme Termin Bildirimi Zorunlu Tut
+                                    </span>
+                                </label>
+                                <p class="text-[10px] text-gray-400 mt-1 leading-relaxed">
+                                    Aktifken işletme/yönetici kabul onayı verirken bir <strong>Termin Aralığı</strong> girmeden onaylayamaz. Görev ekranında Termin Bildirimi paneli ve takvim girişi otomatik olarak açılır.
+                                </p>
+                            </div>
+
                             <!-- Koşullu Onay Doğrulaması (Zorunlu Alan Doğrulaması) -->
                             <div class="pt-3 border-t border-[#334155]">
                                 <label class="flex items-center gap-2 cursor-pointer">
@@ -750,10 +1242,10 @@ const isRuleModalOpen = ref(false);
                                         type="checkbox"
                                         class="rounded border-gray-500 bg-[#334155] text-amber-500 focus:ring-amber-500"
                                     />
-                                    <span class="text-sm text-amber-300 font-semibold">Onaylarken Zorunlu Alan İste</span>
+                                    <span class="text-sm text-amber-300 font-semibold">Onaylarken Özel Alan Zorunlu Tut</span>
                                 </label>
                                 <p class="text-[10px] text-gray-400 mt-1">
-                                    Onay butonuna basıldığında formda/süreçte belirli bir alanın (Örn: termin_tarihi, fatura_no, teslim_tarihi) doldurulmuş olmasını zorunlu kılar.
+                                    Onay butonuna basıldığında formda/süreçte belirli bir alanın (Örn: fatura_no, teslim_tarihi) doldurulmuş olmasını zorunlu kılar.
                                 </p>
 
                                 <div v-if="selectedNodeForSettings.data.requireFieldOnApprove" class="mt-3 space-y-2 bg-[#0f172a]/50 p-3 rounded-lg border border-amber-500/30">
@@ -1039,6 +1531,72 @@ const isRuleModalOpen = ref(false);
                                         Toplam: {{ formatScheduleSummary(selectedNodeForSettings.data) }}
                                     </p>
                                 </div>
+
+                                <!-- BPMN 2.0 ZAMAN SINIR OLAYI & HAT KESİCİ (BOUNDARY TIMER) -->
+                                <div class="pt-4 border-t border-[#334155] space-y-3">
+                                    <div class="flex items-center justify-between">
+                                        <label class="block text-xs font-semibold text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
+                                            <span>⏱️</span> BPMN 2.0 Zaman Sınır Olayı (Boundary Timer)
+                                        </label>
+                                        <span class="text-[10px] font-mono text-gray-400 bg-[#0f172a] px-2 py-0.5 rounded border border-gray-700">Hat Kesici</span>
+                                    </div>
+                                    <p class="text-[10px] text-gray-400 leading-relaxed">
+                                        Görev belirlenen süre içinde tamamlanmazsa süreci duraksatmadan otomatik üst amire eskale eder veya sistem adına onaylar.
+                                    </p>
+
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            v-model="selectedNodeForSettings.data.boundaryTimer.enabled"
+                                            type="checkbox"
+                                            class="rounded border-gray-500 bg-[#334155] text-rose-500 focus:ring-rose-500"
+                                        />
+                                        <span class="text-sm font-semibold text-rose-300">Zaman Sınır Olayını (Hat Kesici) Etkinleştir</span>
+                                    </label>
+
+                                    <div v-if="selectedNodeForSettings.data.boundaryTimer?.enabled" class="mt-3 space-y-3 bg-[#0f172a]/70 p-3 rounded-lg border border-rose-500/30">
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-gray-300 mb-1">Maksimum Bekleme Süresi (SLA Saati)</label>
+                                            <div class="flex items-center gap-2">
+                                                <input 
+                                                    v-model.number="selectedNodeForSettings.data.boundaryTimer.duration_hours" 
+                                                    type="number" 
+                                                    min="1" 
+                                                    class="w-28 bg-[#334155] border-none rounded text-sm text-white focus:ring-1 focus:ring-rose-500 px-3 py-1.5"
+                                                />
+                                                <span class="text-xs text-gray-400">Saat sonra tetiklensin</span>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-gray-300 mb-1">Süre Aşımında Uygulanacak Hat Kesici Aksiyonu</label>
+                                            <div class="space-y-2">
+                                                <label class="flex items-start gap-2 text-xs text-gray-200 cursor-pointer p-1.5 rounded hover:bg-[#1e293b]">
+                                                    <input type="radio" value="auto_escalate" v-model="selectedNodeForSettings.data.boundaryTimer.action" class="text-rose-500 mt-0.5" />
+                                                    <div>
+                                                        <strong class="text-rose-300 block">⚠️ Üst Amirine Eskale Et (Devret)</strong>
+                                                        <span class="text-[10px] text-gray-400">Görev atanan personelden alınıp kullanıcının doğrudan bağlı olduğu departman amirine devredilir.</span>
+                                                    </div>
+                                                </label>
+
+                                                <label class="flex items-start gap-2 text-xs text-gray-200 cursor-pointer p-1.5 rounded hover:bg-[#1e293b]">
+                                                    <input type="radio" value="auto_approve" v-model="selectedNodeForSettings.data.boundaryTimer.action" class="text-teal-500 mt-0.5" />
+                                                    <div>
+                                                        <strong class="text-teal-300 block">⚡ Sistem Adına Otomatik Onayla (Auto-Approve)</strong>
+                                                        <span class="text-[10px] text-gray-400">Zaman aşımında görev sistem tarafından otomatik onaylanır ve akış bir sonraki adıma geçirilir.</span>
+                                                    </div>
+                                                </label>
+
+                                                <label class="flex items-start gap-2 text-xs text-gray-200 cursor-pointer p-1.5 rounded hover:bg-[#1e293b]">
+                                                    <input type="radio" value="notify_reminder" v-model="selectedNodeForSettings.data.boundaryTimer.action" class="text-amber-500 mt-0.5" />
+                                                    <div>
+                                                        <strong class="text-amber-300 block">🚨 Acil SLA Hatırlatması Gönder</strong>
+                                                        <span class="text-[10px] text-gray-400">Personele ve amirine kırmızı acil durum bildirimi fırlatır, görevi devretmez.</span>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <p v-else class="text-sm text-gray-500">
                                 Bu düğüm tipi için gelişmiş ayar bulunmuyor.
@@ -1067,6 +1625,64 @@ const isRuleModalOpen = ref(false);
             :available-nodes="getNodes.filter(n => n.id !== selectedNodeForSettings?.id)"
             @close="isRuleModalOpen = false" 
         />
+
+        <!-- Yeni Versiyon Yayınlama Modalı (Changelog & Publish) -->
+        <div v-if="isPublishVersionModalOpen" class="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fadeIn">
+            <div class="relative w-full max-w-lg bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden text-slate-200">
+                <div class="px-6 py-4 border-b border-slate-800 bg-gradient-to-r from-slate-900 via-purple-950/40 to-slate-900 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-lg text-purple-400">
+                            ✨
+                        </div>
+                        <div>
+                            <h3 class="text-sm font-bold text-white tracking-wide">Yeni Süreç Versiyonu Yayınla</h3>
+                            <p class="text-xs text-slate-400">Zero-Downtime Process Versioning (v{{ (workflow?.version || 1) + 1 }}.0)</p>
+                        </div>
+                    </div>
+                    <button @click="isPublishVersionModalOpen = false" class="text-slate-400 hover:text-white p-1 rounded-lg">✕</button>
+                </div>
+                <div class="p-6 space-y-4 text-xs">
+                    <div class="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/30 text-purple-300 space-y-1.5">
+                        <div class="font-bold flex items-center gap-1.5 text-white">
+                            <span>🛡️</span> <span>Kesintisiz Üretim Güvencesi (Zero-Downtime)</span>
+                        </div>
+                        <p class="text-slate-300 leading-relaxed">
+                            Mevcut sürüm (v{{ workflow?.version || 1 }}.0) üzerinde çalışan canlı süreçler kesintiye uğramaz ve kendi orijinal şemalarıyla tamamlanır. Yeni başlatılacak tüm talepler otomatik olarak bu yeni sürüme (v{{ (workflow?.version || 1) + 1 }}.0) yönlendirilecektir.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label class="block font-bold text-slate-300 mb-1.5">
+                            Değişiklik Notları / Changelog <span class="text-purple-400">*</span>
+                        </label>
+                        <textarea
+                            v-model="publishVersionNotes"
+                            rows="3"
+                            placeholder="Bu versiyonda neler değişti? (Örn: Paralel onay adımları eklendi, laboratuvar test toleransları güncellendi)"
+                            class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:ring-1 focus:ring-purple-500 focus:border-purple-500"
+                        ></textarea>
+                    </div>
+                </div>
+                <div class="px-6 py-3 border-t border-slate-800 bg-slate-900/80 flex items-center justify-end gap-2.5">
+                    <button 
+                        type="button" 
+                        @click="isPublishVersionModalOpen = false"
+                        class="px-4 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                    >
+                        Vazgeç
+                    </button>
+                    <button 
+                        type="button"
+                        @click="publishNewVersion"
+                        :disabled="isPublishingVersion"
+                        class="px-5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold shadow-lg shadow-purple-600/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                        <span v-if="isPublishingVersion" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        <span>{{ isPublishingVersion ? 'Yayınlanıyor...' : 'v' + ((workflow?.version || 1) + 1) + '.0 Olarak Yayınla' }}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
     </AuthenticatedLayout>
 </template>
 

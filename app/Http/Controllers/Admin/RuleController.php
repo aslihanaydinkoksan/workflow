@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Rule;
 use App\Models\Workflow;
+use App\Models\FormTemplate;
 use App\Models\TreeType;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -71,36 +72,71 @@ class RuleController extends Controller
     {
         $fields = [];
 
-        // 1. FORM ALANLARI MAPPING (form.*) -> 'id' kullanıyoruz
-        $formSchema = $workflow->formTemplate->schema ?? [];
-        foreach ($formSchema as $fieldDef) {
-            $fieldName = $fieldDef['id'] ?? '';
-            $rawType = strtolower($fieldDef['type'] ?? 'string');
+        // 1. FORM ALANLARI MAPPING (form.*) -> Akıştaki tüm form şablonlarını (ana form + form düğümleri) tarıyoruz
+        $formTemplates = collect();
+        if ($workflow->formTemplate) {
+            $formTemplates->push($workflow->formTemplate);
+        }
 
-            // Seçenekleri (Options) Array formatına çeviriyoruz
-            $options = null;
-            if (!empty($fieldDef['options'])) {
-                $options = is_array($fieldDef['options'])
-                    ? $fieldDef['options']
-                    : array_map('trim', explode(',', (string) $fieldDef['options']));
+        // Akış düğümlerinde (subFormId) tanımlı diğer formları da ekle
+        foreach ($workflow->nodes ?? [] as $nodeItem) {
+            $subFormId = $nodeItem['data']['subFormId'] ?? null;
+            if ($subFormId) {
+                $subForm = FormTemplate::find($subFormId);
+                if ($subForm && !$formTemplates->contains('id', $subForm->id)) {
+                    $formTemplates->push($subForm);
+                }
             }
+        }
 
-            // Girdi tipini Frontend'in anlayacağı evrensel tiplere dönüştürüyoruz
-            $type = 'text';
-            if (in_array($rawType, ['select', 'dropdown', 'radio', 'çoklu seçim', 'checkbox-group'])) {
-                $type = 'select';
-            } elseif (in_array($rawType, ['checkbox', 'boolean', 'bool', 'evet/hayır', 'switch'])) {
-                $type = 'boolean';
-            } elseif (in_array($rawType, ['number', 'integer', 'int', 'float'])) {
-                $type = 'number';
+        // Eğer akışta hiç form seçilmemişse, yöneticinin kural yazabilmesi için tüm aktif şablonları listele
+        if ($formTemplates->isEmpty()) {
+            $formTemplates = FormTemplate::where('is_active', true)->get();
+        }
+
+        $seenFieldKeys = [];
+        foreach ($formTemplates as $template) {
+            $formSchema = $template->schema ?? [];
+            foreach ($formSchema as $fieldDef) {
+                $fieldName = $fieldDef['id'] ?? $fieldDef['name'] ?? '';
+                if ($fieldName === '' || isset($seenFieldKeys[$fieldName])) {
+                    continue;
+                }
+                $rawType = strtolower($fieldDef['type'] ?? 'string');
+
+                // Sadece görsel olan başlık/bölüm alanlarını atla
+                if (in_array($rawType, ['header', 'section', 'divider', 'label'])) {
+                    continue;
+                }
+
+                $seenFieldKeys[$fieldName] = true;
+
+                // Seçenekleri (Options) Array formatına çeviriyoruz
+                $options = null;
+                if (!empty($fieldDef['options'])) {
+                    $options = is_array($fieldDef['options'])
+                        ? $fieldDef['options']
+                        : array_map('trim', explode(',', (string) $fieldDef['options']));
+                }
+
+                // Girdi tipini Frontend'in anlayacağı evrensel tiplere dönüştürüyoruz
+                $type = 'text';
+                if (in_array($rawType, ['select', 'dropdown', 'radio', 'çoklu seçim', 'checkbox-group'])) {
+                    $type = 'select';
+                } elseif (in_array($rawType, ['checkbox', 'boolean', 'bool', 'evet/hayır', 'switch'])) {
+                    $type = 'boolean';
+                } elseif (in_array($rawType, ['number', 'integer', 'int', 'float'])) {
+                    $type = 'number';
+                }
+
+                $prefixLabel = count($formTemplates) > 1 ? "({$template->name}) " : 'Form: ';
+                $fields[] = [
+                    'value'   => 'form.' . $fieldName,
+                    'label'   => $prefixLabel . ($fieldDef['label'] ?? $fieldName),
+                    'type'    => $type,
+                    'options' => $options
+                ];
             }
-
-            $fields[] = [
-                'value'   => 'form.' . $fieldName,
-                'label'   => 'Form: ' . ($fieldDef['label'] ?? $fieldName),
-                'type'    => $type,
-                'options' => $options
-            ];
         }
 
         // 2. METADATA ALANLARI MAPPING (actor.metadata.* ve target.metadata.*) -> 'field' kullanıyoruz

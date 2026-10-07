@@ -69,6 +69,16 @@ class FormTemplateController extends Controller
         return redirect()->route('form-templates.index')->with('success', 'Form başarıyla kaydedildi.');
     }
 
+    public function show(FormTemplate $formTemplate)
+    {
+        $formTemplate->load(['creator', 'category', 'primaryWorkflows']);
+
+        return Inertia::render('FormBuilder/Show', [
+            'template' => $formTemplate,
+            'app_logo' => Setting::where('key', 'app_logo')->value('value'),
+        ]);
+    }
+
     public function edit(FormTemplate $formTemplate)
     {
         return Inertia::render('FormBuilder/Designer', [

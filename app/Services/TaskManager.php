@@ -33,7 +33,30 @@ class TaskManager
             return $this->createTasksForRole($instance, $nodeId, $nodeData);
         }
 
-        if (in_array($assignType, ['user', 'hierarchy', 'department', 'directorate', 'starter'], true)) {
+        if (in_array($assignType, ['user', 'hierarchy', 'department', 'directorate', 'starter', 'tree_relation'], true)) {
+            $targetUserIds = $this->hierarchyResolver->resolveTargetUsers($nodeData, $instance->started_by);
+
+            if (count($targetUserIds) > 1) {
+                $tasks = [];
+                foreach ($targetUserIds as $userId) {
+                    if (!$userId) continue;
+                    $singleNodeData = array_merge($nodeData, [
+                        'assignType' => 'user',
+                        'assignValue' => (string) $userId,
+                    ]);
+                    $tasks[] = $this->createTask($instance, $nodeId, $singleNodeData);
+                }
+                if (!empty($tasks)) {
+                    return $tasks;
+                }
+            } elseif (count($targetUserIds) === 1) {
+                $singleNodeData = array_merge($nodeData, [
+                    'assignType' => 'user',
+                    'assignValue' => (string) $targetUserIds[0],
+                ]);
+                return [$this->createTask($instance, $nodeId, $singleNodeData)];
+            }
+
             return [$this->createTask($instance, $nodeId, $nodeData)];
         }
 
@@ -71,12 +94,36 @@ class TaskManager
         // 2. Fallback (Yedek) Atama Stratejileri
         $assignedTo = $this->applyFallbackAssignments($assignedTo, $assignedRoleId, $taskType, $instance->started_by);
 
-        // 3. Vekalet (Delegation) Kontrolü
-        if ($assignedTo) {
-            $assignedTo = $this->delegationService->resolveAssignee((int) $assignedTo);
+        // 3. Görevler Ayrılığı İlkesi (SoD / 4-Göz İlkesi - Fortune 500 Standardı):
+        // Talep sahibi, kendi başlattığı sürecin onaylayıcısı / inceleyicisi OLAMAZ!
+        $sodEscalated = false;
+        if (in_array($taskType, ['approval', 'review'], true) && $assignedTo && (int)$assignedTo === (int)$instance->started_by) {
+            $starter = User::find($instance->started_by);
+            if ($starter && $starter->manager_id && (int)$starter->manager_id !== (int)$instance->started_by) {
+                $superior = User::find($starter->manager_id);
+                if ($superior) {
+                    $assignedTo = (int) $starter->manager_id;
+                    $sodEscalated = true;
+
+                    app(\App\Services\ProcessAuditService::class)->recordAdminIntervention(
+                        $instance,
+                        'sod_escalation',
+                        null,
+                        "Görevler Ayrılığı (4-Göz İlkesi) Otomatik Eskalasyon",
+                        $starter->name . " (Talep Sahibi)",
+                        $superior->name . " (Üst Amir)",
+                        "Talep sahibi kendi talebinin onaylayıcısı olamayacağından (SoD / 4-Eyes Principle) onay görevi otomatik olarak bir üst amire yönlendirilmiştir."
+                    );
+                }
+            }
         }
 
-        // 4. Görevi Oluştur
+        // 4. Kapsamlı Süreli ve Kategori Bazlı Vekalet (Scoped Delegation) Kontrolü
+        if ($assignedTo) {
+            $assignedTo = $this->delegationService->resolveAssignee((int) $assignedTo, $instance);
+        }
+
+        // 5. Görevi Oluştur
         $task = Task::create([
             'process_instance_id' => $instance->id,
             'node_id'             => $nodeId,
@@ -122,7 +169,12 @@ class TaskManager
         if (in_array($assignType, ['hierarchy', 'department', 'directorate', 'tree_relation'], true)) {
             $result['assignedTo'] = $this->hierarchyResolver->resolveTargetUser($nodeData, $instance->started_by);
         } elseif ($assignType === 'user') {
-            $result['assignedTo'] = (int) $assignValue;
+            if (is_numeric($assignValue) && (int) $assignValue > 0) {
+                $result['assignedTo'] = (int) $assignValue;
+            } else {
+                $targetUsers = $this->hierarchyResolver->resolveTargetUsers($nodeData, $instance->started_by);
+                $result['assignedTo'] = $targetUsers[0] ?? null;
+            }
         } elseif ($assignType === 'starter') {
             $result['assignedTo'] = $instance->started_by;
         } elseif ($assignType === 'role') {
@@ -320,20 +372,44 @@ class TaskManager
             ]);
     }
 
-    public function completeTask(Task $task, string $comment = null): void
+    public function cancelPendingTasksForInstance(ProcessInstance $instance, ?int $exceptTaskId = null): void
+    {
+        Task::query()
+            ->where('process_instance_id', $instance->id)
+            ->where('status', 'pending')
+            ->when($exceptTaskId, fn($query) => $query->where('id', '!=', $exceptTaskId))
+            ->update([
+                'status' => 'cancelled',
+                'completed_at' => now(),
+            ]);
+    }
+
+    public function completeTask(Task $task, ?string $comment = null, ?int $completedBy = null): void
     {
         $task->update([
             'status' => 'completed',
             'comment' => $comment,
+            'completed_by' => $completedBy ?? \Illuminate\Support\Facades\Auth::id() ?? $task->assigned_to,
             'completed_at' => now(),
         ]);
     }
 
-    public function rejectTask(Task $task, string $comment = null): void
+    public function rejectTask(Task $task, ?string $comment = null, ?int $completedBy = null): void
     {
         $task->update([
             'status' => 'rejected',
             'comment' => $comment,
+            'completed_by' => $completedBy ?? \Illuminate\Support\Facades\Auth::id() ?? $task->assigned_to,
+            'completed_at' => now(),
+        ]);
+    }
+
+    public function reviseTask(Task $task, ?string $comment = null, ?int $completedBy = null): void
+    {
+        $task->update([
+            'status' => 'revised',
+            'comment' => $comment,
+            'completed_by' => $completedBy ?? \Illuminate\Support\Facades\Auth::id() ?? $task->assigned_to,
             'completed_at' => now(),
         ]);
     }

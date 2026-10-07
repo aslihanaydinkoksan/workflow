@@ -64,16 +64,25 @@ const markAllAsRead = () => {
 
     <AuthenticatedLayout>
         <template #header>
-            <div class="flex items-center justify-between gap-4">
-                <h2 class="text-xl font-semibold leading-tight text-gray-800">Bildirim Merkezi</h2>
-                <button
-                    v-if="notifications.data?.some((item) => !item.read_at)"
-                    type="button"
-                    class="text-sm font-medium text-indigo-600 hover:text-indigo-800"
-                    @click="markAllAsRead"
-                >
-                    Tümünü okundu işaretle
-                </button>
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-semibold leading-tight text-gray-800">Bildirim Merkezi</h2>
+                    <p class="text-xs text-gray-500 mt-0.5">Bildirimleriniz bu sayfayı açtığınızda otomatik olarak okundu işaretlenir.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span>Tüm Bildirimler Güncel</span>
+                    </span>
+                    <button
+                        v-if="notifications.data?.some((item) => !item.read_at)"
+                        type="button"
+                        class="text-xs font-medium text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-3 py-1 rounded-lg hover:bg-indigo-50 transition"
+                        @click="markAllAsRead"
+                    >
+                        Tümünü okundu işaretle
+                    </button>
+                </div>
             </div>
         </template>
 

@@ -23,7 +23,18 @@ class CertificateGenerator
         $customerName = $data['musteri_adi'] ?? $data['customer_name'] ?? 'Genel Müşteri';
         $lotNo = $data['lot_no'] ?? $data['parti_no'] ?? ('LOT-' . date('ymd') . '-' . $instance->id);
         $quantity = $data['miktar'] ?? $data['numune_miktari'] ?? $data['rulo_ozellikleri'] ?? '50 Adet / Kg';
-        $productionDate = isset($data['uretim_tarihi']) ? date('d.m.Y', strtotime($data['uretim_tarihi'])) : now()->format('d.m.Y');
+        $rawDate = $data['uretim_tarihi'] ?? null;
+        if (is_array($rawDate)) {
+            $first = reset($rawDate);
+            if (is_array($first)) {
+                $rawDate = $first['start'] ?? $first['date'] ?? null;
+            } elseif (is_string($first)) {
+                $rawDate = $first;
+            } else {
+                $rawDate = null;
+            }
+        }
+        $productionDate = !empty($rawDate) && @strtotime((string) $rawDate) ? date('d.m.Y', strtotime((string) $rawDate)) : now()->format('d.m.Y');
         $salesPerson = $instance->starter?->name ?? 'Satış Temsilcisi';
 
         // İşletme/Kalite adımı görevinden onaylayan kişinin adını bul

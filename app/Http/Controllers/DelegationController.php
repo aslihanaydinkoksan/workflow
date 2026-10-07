@@ -20,14 +20,20 @@ class DelegationController extends Controller
             'delegatee_id' => 'required|exists:users,id',
             'start_date' => 'required|date|after_or_equal:today',
             'end_date' => 'required|date|after_or_equal:start_date',
+            'scope_type' => 'nullable|string|in:all,category,workflow',
+            'scope_value' => 'nullable|string|max:150',
+            'reason' => 'nullable|string|max:255',
         ]);
 
         $delegation = Delegation::create([
             'delegator_id' => Auth::id(),
             'delegatee_id' => $validated['delegatee_id'],
-            'start_date' => $validated['start_date'],
-            'end_date' => $validated['end_date'],
-            'status' => 'active',
+            'start_date'   => $validated['start_date'],
+            'end_date'     => $validated['end_date'],
+            'status'       => 'active',
+            'scope_type'   => $validated['scope_type'] ?? 'all',
+            'scope_value'  => $validated['scope_value'] ?? null,
+            'reason'       => $validated['reason'] ?? null,
         ]);
 
         $notificationService->delegationAssigned($delegation);

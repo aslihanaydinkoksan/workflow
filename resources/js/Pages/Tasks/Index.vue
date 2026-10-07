@@ -1,7 +1,30 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import { Head, Link, useForm } from '@inertiajs/vue3'; // DİKKAT: useForm BURAYA EKLENDİ
-import { ref, computed } from 'vue'; // DİKKAT: computed BURAYA EKLENDİ
+import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
+import { ref, computed } from 'vue';
+
+const page = usePage();
+const user = computed(() => page.props.auth?.user || page.props.user);
+const isAdmin = computed(() => {
+    const roles = user.value?.roles || [];
+    return roles.includes('Admin') || roles.includes('superadmin') || roles.some(r => r === 'Admin' || r.name === 'Admin');
+});
+
+// Admin Hızlı Kapsam Filtresi: 'assigned_to_me' (Bana Atananlar) veya 'all' (Tüm Şirket Havuzu)
+const adminTaskScope = ref('all');
+
+const myPersonalPendingCount = computed(() => {
+    if (!props.tasks) return 0;
+    return props.tasks.filter(t => t.assigned_to === user.value?.id).length;
+});
+
+const filteredPendingTasks = computed(() => {
+    if (!props.tasks) return [];
+    if (!isAdmin.value || adminTaskScope.value === 'all') {
+        return props.tasks;
+    }
+    return props.tasks.filter(t => t.assigned_to === user.value?.id);
+});
 
 const props = defineProps({
     tasks: Array,
@@ -12,17 +35,28 @@ const props = defineProps({
     pending_follow_ups: {
         type: Array,
         default: () => [],
-    }
+    },
+    active_workflows: {
+        type: Array,
+        default: () => [],
+    },
+    workflow_categories: {
+        type: Array,
+        default: () => [],
+    },
 });
 
 const activeTab = ref('pending'); // 'pending' or 'completed'
 const isDelegationPanelOpen = ref(false);
 
-// Vekalet Formu
+// Vekalet Formu (Fortune 500 Scoped Delegation)
 const delegationForm = useForm({
     delegatee_id: '',
     start_date: '',
-    end_date: ''
+    end_date: '',
+    scope_type: 'all', // 'all', 'category', 'workflow'
+    scope_value: '',
+    reason: '',
 });
 
 // Arama Kutusu (Kullanıcı Filtreleme)
@@ -49,7 +83,19 @@ const submitDelegation = () => {
     });
 };
 
-const getBadgeColor = (type) => {
+const isRevisionTask = (task) => {
+    return !!(
+        task.is_revision ||
+        task.process_instance?.data?.isletme_karari === 'Revizyon İstendi' ||
+        (task.title || '').toLowerCase().includes('reviz')
+    );
+};
+
+const getBadgeColor = (task) => {
+    if (typeof task === 'object' && isRevisionTask(task)) {
+        return 'bg-orange-100 text-orange-800 border border-orange-300 font-bold';
+    }
+    const type = typeof task === 'object' ? task.type : task;
     switch (type) {
         case 'approval': return 'bg-yellow-100 text-yellow-800';
         case 'review': return 'bg-purple-100 text-purple-800';
@@ -58,7 +104,11 @@ const getBadgeColor = (type) => {
     }
 };
 
-const getTypeName = (type) => {
+const getTypeName = (task) => {
+    if (typeof task === 'object' && isRevisionTask(task)) {
+        return '🔄 Revizyon / Düzeltme';
+    }
+    const type = typeof task === 'object' ? task.type : task;
     switch (type) {
         case 'approval': return 'Onay Bekliyor';
         case 'review': return 'İnceleme (Bilgi)';
@@ -125,7 +175,7 @@ const getDueInfo = (task) => {
                             ]">
                                 Bekleyen Görevler
                                 <span class="ml-2 bg-indigo-100 text-indigo-800 py-0.5 px-2 rounded-full text-xs">{{
-                                    tasks.length }}</span>
+                                    filteredPendingTasks.length }}</span>
                             </button>
                         </li>
                         <li class="mr-2" role="presentation">
@@ -174,11 +224,57 @@ const getDueInfo = (task) => {
                                 </div>
                             </div>
 
-                            <div v-if="tasks.length === 0 && (!pending_follow_ups || pending_follow_ups.length === 0)" class="text-center py-8 text-gray-500">
-                                Şu an bekleyen bir göreviniz bulunmuyor. Harika! 🎉
+                            <!-- Admin Kapsam Filtresi (Bana Atananlar vs Tüm Şirket Havuzu) -->
+                            <div v-if="isAdmin" class="mb-4 p-3 bg-slate-50 border border-slate-200/80 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">Görünüm:</span>
+                                    <div class="inline-flex rounded-lg bg-slate-200/80 p-0.5">
+                                        <button
+                                            type="button"
+                                            @click="adminTaskScope = 'assigned_to_me'"
+                                            :class="[
+                                                'px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1.5',
+                                                adminTaskScope === 'assigned_to_me' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                                            ]"
+                                        >
+                                            <span>📌 Bana Atananlar</span>
+                                            <span class="px-1.5 py-0.2 text-[10px] rounded-full" :class="adminTaskScope === 'assigned_to_me' ? 'bg-indigo-100 text-indigo-800 font-bold' : 'bg-slate-300 text-slate-700'">
+                                                {{ myPersonalPendingCount }}
+                                            </span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            @click="adminTaskScope = 'all'"
+                                            :class="[
+                                                'px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1.5',
+                                                adminTaskScope === 'all' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                                            ]"
+                                        >
+                                            <span>🏢 Tüm Şirket Havuzu</span>
+                                            <span class="px-1.5 py-0.2 text-[10px] rounded-full" :class="adminTaskScope === 'all' ? 'bg-indigo-100 text-indigo-800 font-bold' : 'bg-slate-300 text-slate-700'">
+                                                {{ tasks.length }}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <span class="text-xs text-slate-500 font-medium">
+                                    {{ adminTaskScope === 'assigned_to_me' ? 'Yalnızca doğrudan size atanmış kişisel görevler listeleniyor.' : 'Tüm departmanlara ait genel havuz listeleniyor.' }}
+                                </span>
                             </div>
 
-                            <div v-if="tasks.length > 0" class="overflow-x-auto">
+                            <div v-if="filteredPendingTasks.length === 0 && (!pending_follow_ups || pending_follow_ups.length === 0)" class="text-center py-8 text-gray-500">
+                                <p class="text-sm font-medium">
+                                    {{ adminTaskScope === 'assigned_to_me' ? 'Size doğrudan atanmış bekleyen bir görev bulunmuyor.' : 'Şu an bekleyen bir görev bulunmuyor. Harika! 🎉' }}
+                                </p>
+                                <button v-if="adminTaskScope === 'assigned_to_me' && tasks.length > 0"
+                                    type="button"
+                                    @click="adminTaskScope = 'all'"
+                                    class="mt-2 text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline">
+                                    Tüm şirket havuzunu görüntüle ({{ tasks.length }} görev)
+                                </button>
+                            </div>
+
+                            <div v-if="filteredPendingTasks.length > 0" class="overflow-x-auto">
                                 <table class="min-w-full divide-y divide-gray-200">
                                     <thead class="bg-gray-50">
                                         <tr>
@@ -203,7 +299,7 @@ const getDueInfo = (task) => {
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200">
-                                        <tr v-for="task in tasks" :key="task.id" class="hover:bg-gray-50">
+                                        <tr v-for="task in filteredPendingTasks" :key="task.id" class="hover:bg-gray-50">
                                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">#{{ task.id }}
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap">
@@ -222,11 +318,15 @@ const getDueInfo = (task) => {
                                                     </svg>
                                                     {{ task.process_instance.starter?.name || 'Sistem' }}
                                                 </div>
+                                                <div v-if="task.process_instance?.data?.termin_araligi" class="inline-flex items-center gap-1.5 mt-1.5 px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                                    <span>⏱️ Termin:</span>
+                                                    <span>{{ task.process_instance.data.termin_araligi }}</span>
+                                                </div>
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap">
                                                 <span
-                                                    :class="['px-2 inline-flex text-xs leading-5 font-semibold rounded-full', getBadgeColor(task.type)]">
-                                                    {{ getTypeName(task.type) }}
+                                                    :class="['px-2 inline-flex text-xs leading-5 font-semibold rounded-full', getBadgeColor(task)]">
+                                                    {{ getTypeName(task) }}
                                                 </span>
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap">
@@ -242,8 +342,14 @@ const getDueInfo = (task) => {
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                 <Link :href="route('tasks.show', task.id)"
-                                                    class="inline-flex items-center text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-md transition-colors font-bold">
-                                                    Göreve Git &rarr;
+                                                    :class="[
+                                                        'inline-flex items-center px-3.5 py-1.5 rounded-md transition-colors font-bold text-xs gap-1',
+                                                        isRevisionTask(task)
+                                                            ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-sm'
+                                                            : 'text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100'
+                                                    ]">
+                                                    <span>{{ isRevisionTask(task) ? '✏️ Revize Et' : 'Göreve Git' }}</span>
+                                                    <span>&rarr;</span>
                                                 </Link>
                                             </td>
                                         </tr>
@@ -419,6 +525,79 @@ const getDueInfo = (task) => {
                                                 class="w-full text-sm border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500">
                                         </div>
                                     </div>
+
+                                    <!-- Kapsam Seçimi (Scope) -->
+                                    <div class="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2.5">
+                                        <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                            Vekalet Kapsamı
+                                        </label>
+                                        <div class="grid grid-cols-3 gap-1.5 text-xs font-semibold">
+                                            <button
+                                                type="button"
+                                                @click="delegationForm.scope_type = 'all'; delegationForm.scope_value = ''"
+                                                class="p-2 rounded-lg border text-center transition-all"
+                                                :class="delegationForm.scope_type === 'all' ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'"
+                                            >
+                                                🌐 Tüm Süreçler
+                                            </button>
+                                            <button
+                                                type="button"
+                                                @click="delegationForm.scope_type = 'category'"
+                                                class="p-2 rounded-lg border text-center transition-all"
+                                                :class="delegationForm.scope_type === 'category' ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'"
+                                            >
+                                                📁 Kategori
+                                            </button>
+                                            <button
+                                                type="button"
+                                                @click="delegationForm.scope_type = 'workflow'"
+                                                class="p-2 rounded-lg border text-center transition-all"
+                                                :class="delegationForm.scope_type === 'workflow' ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'"
+                                            >
+                                                📄 İş Akışı
+                                            </button>
+                                        </div>
+
+                                        <!-- Kategori Seçici -->
+                                        <div v-if="delegationForm.scope_type === 'category'" class="mt-2">
+                                            <select
+                                                v-model="delegationForm.scope_value"
+                                                class="w-full text-xs rounded-lg border-gray-300 focus:ring-indigo-500 focus:border-indigo-500"
+                                                required
+                                            >
+                                                <option value="">Kategori seçiniz...</option>
+                                                <option v-for="cat in workflow_categories" :key="cat" :value="cat">
+                                                    {{ cat }}
+                                                </option>
+                                            </select>
+                                        </div>
+
+                                        <!-- Akış Seçici -->
+                                        <div v-if="delegationForm.scope_type === 'workflow'" class="mt-2">
+                                            <select
+                                                v-model="delegationForm.scope_value"
+                                                class="w-full text-xs rounded-lg border-gray-300 focus:ring-indigo-500 focus:border-indigo-500"
+                                                required
+                                            >
+                                                <option value="">İş akışı seçiniz...</option>
+                                                <option v-for="wf in active_workflows" :key="wf.id" :value="String(wf.id)">
+                                                    #{{ wf.id }} - {{ wf.name }}
+                                                </option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <!-- Vekalet Gerekçesi -->
+                                    <div>
+                                        <label class="block text-xs font-semibold text-gray-700 mb-1">Gerekçe / Neden (Opsiyonel)</label>
+                                        <input
+                                            type="text"
+                                            v-model="delegationForm.reason"
+                                            placeholder="Örn: Yıllık İzin, Sağlık Raporu, Fuar Katılımı"
+                                            class="w-full text-xs border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                                        >
+                                    </div>
+
                                     <button type="submit" :disabled="delegationForm.processing"
                                         class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50">
                                         {{ delegationForm.processing ? 'Kaydediliyor...' : 'Vekalet Tanımla' }}
@@ -436,11 +615,25 @@ const getDueInfo = (task) => {
                                     <div v-for="del in given_delegations" :key="del.id"
                                         class="bg-gray-50 p-3 rounded-lg border border-gray-200 flex items-center justify-between">
                                         <div class="text-sm">
-                                            <div class="font-bold text-gray-800">{{ del.delegatee?.name }}</div>
+                                            <div class="font-bold text-gray-800 flex items-center gap-2">
+                                                <span>{{ del.delegatee?.name }}</span>
+                                                <span v-if="del.scope_type === 'category'" class="px-2 py-0.5 rounded text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-200">
+                                                    📁 {{ del.scope_value }}
+                                                </span>
+                                                <span v-else-if="del.scope_type === 'workflow'" class="px-2 py-0.5 rounded text-[10px] font-black bg-blue-100 text-blue-800 border border-blue-200">
+                                                    📄 Akış #{{ del.scope_value }}
+                                                </span>
+                                                <span v-else class="px-2 py-0.5 rounded text-[10px] font-black bg-slate-100 text-slate-700 border border-slate-200">
+                                                    🌐 Tüm Süreçler
+                                                </span>
+                                            </div>
                                             <div class="text-xs text-gray-500 mt-1">{{ del.start_date }} <span
                                                     class="mx-1">→</span> {{ del.end_date }}</div>
+                                            <div v-if="del.reason" class="text-[11px] text-gray-600 italic mt-0.5">
+                                                "{{ del.reason }}"
+                                            </div>
                                             <span :class="del.status === 'active' ? 'text-green-600' : 'text-red-500'"
-                                                class="text-[10px] font-bold uppercase">{{ del.status }}</span>
+                                                class="text-[10px] font-bold uppercase mt-1 block">{{ del.status }}</span>
                                         </div>
                                         <Link v-if="del.status === 'active'"
                                             :href="route('delegations.destroy', del.id)" method="delete" as="button"
@@ -466,17 +659,27 @@ const getDueInfo = (task) => {
                                     <div v-for="del in received_delegations" :key="del.id"
                                         class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
                                         <div class="text-sm">
-                                            <span
-                                                class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold mb-1 inline-block">Yerine
-                                                Baktığınız:</span>
+                                            <div class="flex items-center gap-1.5 mb-1">
+                                                <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold inline-block">
+                                                    Yerine Baktığınız:
+                                                </span>
+                                                <span v-if="del.scope_type === 'category'" class="px-2 py-0.5 rounded text-[10px] font-black bg-purple-100 text-purple-800">
+                                                    📁 {{ del.scope_value }}
+                                                </span>
+                                                <span v-else-if="del.scope_type === 'workflow'" class="px-2 py-0.5 rounded text-[10px] font-black bg-blue-100 text-blue-800">
+                                                    📄 Akış #{{ del.scope_value }}
+                                                </span>
+                                            </div>
                                             <div class="font-bold text-gray-800">{{ del.delegator?.name }}</div>
                                             <div class="text-xs text-gray-500 mt-1">{{ del.start_date }} <span
                                                     class="mx-1">→</span> {{ del.end_date }}</div>
+                                            <div v-if="del.reason" class="text-[11px] text-gray-600 italic mt-0.5">
+                                                "{{ del.reason }}"
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-
                         </div>
                     </div>
                 </div>

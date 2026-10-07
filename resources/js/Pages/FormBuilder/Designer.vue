@@ -40,6 +40,7 @@ const availableTools = ref([
     { type: 'select', label: 'Açılır Liste', icon: '🔽' },
     { type: 'radio', label: 'Tekli Seçim (Radio)', icon: '🔘' },
     { type: 'date', label: 'Tarih', icon: '📅' },
+    { type: 'date_range', label: 'Tarih Aralığı', icon: '📆' },
     { type: 'file', label: 'Dosya Yükleme', icon: '📎' },
     { type: 'checkbox', label: 'Onay Kutusu', icon: '☑️' },
     { type: 'header', label: 'Başlık / Açıklama', icon: '🏷️' },
@@ -48,10 +49,14 @@ const availableTools = ref([
 const selectedField = ref(null);
 
 const cloneDog = (tool) => {
+    const isRange = tool.type === 'date_range';
     return {
         id: 'field_' + Date.now() + Math.floor(Math.random() * 1000), // Benzersiz ID garantisi
-        type: tool.type,
-        label: 'Yeni ' + tool.label,
+        type: isRange ? 'date' : tool.type,
+        date_mode: isRange ? 'range' : (tool.type === 'date' ? 'single' : undefined),
+        allow_multiple: false,
+        allow_note: false,
+        label: isRange ? 'Tarih Aralığı' : ('Yeni ' + tool.label),
         required: false,
         placeholder: '',
         width: '12', // Grid sistemi için varsayılan tam genişlik (col-span-12)
@@ -61,6 +66,11 @@ const cloneDog = (tool) => {
 };
 
 const selectField = (field) => {
+    if (field && field.type === 'date') {
+        if (!field.date_mode) field.date_mode = 'single';
+        if (field.allow_multiple === undefined) field.allow_multiple = false;
+        if (field.allow_note === undefined) field.allow_note = false;
+    }
     selectedField.value = field;
 };
 
@@ -243,30 +253,58 @@ const handleDataBindChange = () => {
                                             <span v-if="element.required" class="text-red-500 ml-1" title="Zorunlu Alan">*</span>
                                         </label>
                                         
-                                        <input v-if="['text', 'number', 'date'].includes(element.type)" :type="element.type" disabled 
+                                        <input v-if="['text', 'number'].includes(element.type)" :type="element.type" disabled 
                                             class="block w-full rounded-md shadow-sm sm:text-sm cursor-not-allowed transition-colors"
                                             :class="element.data_bind ? 'border-indigo-300 bg-indigo-50 text-indigo-600 font-medium placeholder-indigo-400' : 'border-gray-300 bg-gray-50 text-gray-500'" 
                                             :placeholder="element.data_bind ? '⚡ [Otomatik: ' + getBindingLabel(element.data_bind) + ']' : (element.placeholder || 'Kullanıcı veri girişi yapacak...')">
                                         
-                                        <textarea v-if="element.type === 'textarea'" disabled 
+                                        <!-- Tarih ve Tarih Aralığı Canvas Görseli -->
+                                        <div v-else-if="element.type === 'date'" class="space-y-2">
+                                            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                                <div class="flex-1 relative">
+                                                    <span class="absolute left-2.5 top-2 text-xs text-gray-400">📅</span>
+                                                    <input type="text" disabled 
+                                                        class="block w-full pl-8 rounded-md shadow-sm sm:text-xs border-gray-300 bg-gray-50 text-gray-500 cursor-not-allowed"
+                                                        :placeholder="element.date_mode === 'range' ? 'Başlangıç Tarihi' : 'GG.AA.YYYY'">
+                                                </div>
+                                                
+                                                <template v-if="element.date_mode === 'range'">
+                                                    <span class="text-gray-400 text-xs font-bold text-center self-center px-1">&rarr;</span>
+                                                    <div class="flex-1 relative">
+                                                        <span class="absolute left-2.5 top-2 text-xs text-gray-400">📅</span>
+                                                        <input type="text" disabled 
+                                                            class="block w-full pl-8 rounded-md shadow-sm sm:text-xs border-gray-300 bg-gray-50 text-gray-500 cursor-not-allowed"
+                                                            placeholder="Bitiş Tarihi">
+                                                    </div>
+                                                </template>
+
+                                                <div v-if="element.allow_note" class="flex-1 relative">
+                                                    <input type="text" disabled 
+                                                        class="block w-full rounded-md shadow-sm sm:text-xs border-amber-300 bg-amber-50/50 text-gray-500 cursor-not-allowed"
+                                                        placeholder="Açıklama / Not Metni">
+                                                </div>
+                                            </div>
+
+                                            <!-- Çoklu Tarih Rozeti ve Ekleme Butonu Önizlemesi -->
+                                            <div v-if="element.allow_multiple" class="pt-1 flex items-center justify-between border-t border-gray-100 mt-2">
+                                                <span class="inline-flex items-center text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                                                    🔁 Çoklu Tarih Girişi (+ Tarih Ekle)
+                                                </span>
+                                                <span class="text-[11px] text-gray-400">Kullanıcı ek satırlar ekleyebilir</span>
+                                            </div>
+                                        </div>
+
+                                        <textarea v-else-if="element.type === 'textarea'" disabled 
                                             class="block w-full rounded-md shadow-sm sm:text-sm cursor-not-allowed transition-colors" rows="3"
                                             :class="element.data_bind ? 'border-indigo-300 bg-indigo-50 text-indigo-600 font-medium placeholder-indigo-400' : 'border-gray-300 bg-gray-50 text-gray-500'" 
                                             :placeholder="element.data_bind ? '⚡ [Otomatik: ' + getBindingLabel(element.data_bind) + ']' : (element.placeholder || 'Kullanıcı veri girişi yapacak...')"></textarea>
                                         
-                                        <select v-if="element.type === 'select'" disabled 
+                                        <select v-else-if="element.type === 'select'" disabled 
                                             class="block w-full rounded-md shadow-sm sm:text-sm cursor-not-allowed transition-colors"
                                             :class="element.data_bind ? 'border-indigo-300 bg-indigo-50 text-indigo-600 font-medium' : 'border-gray-300 bg-gray-50 text-gray-500'">
                                             <option v-if="element.data_bind">⚡ [Otomatik Liste: {{ getBindingLabel(element.data_bind) }}]</option>
                                             <option v-else v-for="(opt, i) in (element.options ? element.options.split(',') : ['Seçenek 1'])" :key="i">
                                                 {{ opt.trim() }}
-                                            </option>
-                                        </select>
-
-                                        <select v-if="element.type === 'select'" disabled 
-                                            class="block w-full rounded-md shadow-sm sm:text-sm cursor-not-allowed transition-colors"
-                                            :class="element.data_bind ? 'border-indigo-300 bg-indigo-50 text-indigo-600 font-medium' : 'border-gray-300 bg-gray-50 text-gray-500'">
-                                            <option v-for="(opt, i) in (element.options ? element.options.split(',') : ['Seçenek 1'])" :key="i">
-                                                {{ element.data_bind && i === 0 ? '⚡ [Oto] ' : '' }}{{ opt.trim() }}
                                             </option>
                                         </select>
 
@@ -362,6 +400,81 @@ const handleDataBindChange = () => {
                             </div>
                             <div class="text-xs text-blue-500">
                                 <strong>Önizleme:</strong> {{ selectedField.options ? selectedField.options.split(',').length : 0 }} seçenek algılandı.
+                            </div>
+                        </div>
+
+                        <!-- Tarih Alanı Özel Ayarları (Tarih Aralığı, Çoklu Tarih, Açıklama) -->
+                        <div v-if="selectedField.type === 'date'" class="bg-amber-50 p-4 rounded-lg border border-amber-200 space-y-4">
+                            <h4 class="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                                <span>📅</span> Tarih & Aralık Yapılandırması
+                            </h4>
+
+                            <!-- Tarih Seçim Türü -->
+                            <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1.5">Tarih Seçim Türü</label>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        @click="selectedField.date_mode = 'single'"
+                                        :class="[
+                                            'px-3 py-2 text-xs font-bold rounded-lg border text-center transition-all',
+                                            selectedField.date_mode !== 'range' 
+                                                ? 'bg-amber-600 text-white border-amber-600 shadow-sm' 
+                                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                                        ]"
+                                    >
+                                        📅 Tek Tarih
+                                    </button>
+                                    <button
+                                        type="button"
+                                        @click="selectedField.date_mode = 'range'"
+                                        :class="[
+                                            'px-3 py-2 text-xs font-bold rounded-lg border text-center transition-all',
+                                            selectedField.date_mode === 'range' 
+                                                ? 'bg-amber-600 text-white border-amber-600 shadow-sm' 
+                                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                                        ]"
+                                    >
+                                        📆 Tarih Aralığı
+                                    </button>
+                                </div>
+                                <p class="text-[11px] text-amber-800 mt-1">
+                                    {{ selectedField.date_mode === 'range' ? 'Kullanıcı Başlangıç ve Bitiş şeklinde iki tarih seçecektir.' : 'Kullanıcı tek bir gün/tarih seçecektir.' }}
+                                </p>
+                            </div>
+
+                            <!-- Birden Fazla Tarih Eklenebilir mi? -->
+                            <div class="pt-3 border-t border-amber-200">
+                                <label class="flex items-start gap-2.5 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        v-model="selectedField.allow_multiple"
+                                        class="mt-0.5 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                    />
+                                    <div>
+                                        <span class="text-xs font-bold text-gray-900 block">Birden fazla tarih eklenebilir mi?</span>
+                                        <span class="text-[11px] text-gray-600 block leading-tight mt-0.5">
+                                            İşaretlenirse, kullanıcı formda "+ Tarih Ekle" butonu ile birden fazla tarih veya tarih aralığı satırı ekleyebilir.
+                                        </span>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <!-- Açıklama Alanı Eklenebilir mi? -->
+                            <div class="pt-3 border-t border-amber-200">
+                                <label class="flex items-start gap-2.5 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        v-model="selectedField.allow_note"
+                                        class="mt-0.5 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                    />
+                                    <div>
+                                        <span class="text-xs font-bold text-gray-900 block">Açıklama alanı eklenebilir mi?</span>
+                                        <span class="text-[11px] text-gray-600 block leading-tight mt-0.5">
+                                            İşaretlenirse, her tarih/aralık kaydının yanına kullanıcı serbest açıklama metni girebilir (Örn: Seyahat Nedeni, Açıklama vb.).
+                                        </span>
+                                    </div>
+                                </label>
                             </div>
                         </div>
 

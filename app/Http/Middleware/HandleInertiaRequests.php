@@ -68,8 +68,17 @@ class HandleInertiaRequests extends Middleware
                 'pending_tasks_notice' => fn() => $request->session()->get('pending_tasks_notice'),
             ],
             'pending_tasks_count' => fn() => $user
-                ? TaskVisibility::queryForUser($user)->where('status', 'pending')->count()
+                ? TaskVisibility::personalPendingCountForUser($user)
                 : 0,
+            'total_pool_tasks_count' => fn() => $user && ($user->hasRole('Admin') || $user->hasRole('superadmin'))
+                ? TaskVisibility::totalPoolCount()
+                : 0,
+            'overdue_tasks_count' => fn() => $user
+                ? TaskVisibility::overdueCountForUser($user)
+                : 0,
+            'is_admin_user' => fn() => $user
+                ? ($user->hasRole('Admin') || $user->hasRole('superadmin'))
+                : false,
             'pending_follow_ups_count' => fn() => $user
                 ? ($user->hasRole('Admin') || $user->hasRole('superadmin')
                     ? \App\Models\FollowUp::where('status', 'pending')->count()
@@ -91,6 +100,23 @@ class HandleInertiaRequests extends Middleware
                 ->limit(8)
                 ->get(['id', 'type', 'title', 'body', 'data', 'read_at', 'created_at'])
                 : [],
+            'dev_mode' => app()->environment('local'),
+            'dev_users' => fn () => app()->environment('local') ? \App\Models\User::with(['roles:id,name', 'department:id,name'])
+                ->select('id', 'name', 'first_name', 'last_name', 'email', 'title', 'department_id')
+                ->get()
+                ->map(function ($u) {
+                    return [
+                        'id' => $u->id,
+                        'name' => $u->name,
+                        'email' => $u->email,
+                        'title' => $u->title,
+                        'department' => $u->department?->name,
+                        'department_id' => $u->department_id,
+                        'roles' => $u->roles->pluck('name')->toArray(),
+                    ];
+                }) : [],
+            'dev_departments' => fn () => app()->environment('local') ? \App\Models\Department::select('id', 'name')->orderBy('name')->get() : [],
+            'dev_roles' => fn () => app()->environment('local') ? \Spatie\Permission\Models\Role::select('id', 'name')->orderBy('name')->get() : [],
         ];
     }
 }

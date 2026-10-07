@@ -30,10 +30,106 @@ const props = defineProps({
         type: Number,
         default: null,
     },
+    terminSla: {
+        type: Object,
+        default: null,
+    },
+    terminRevisions: {
+        type: Array,
+        default: () => [],
+    },
+    terminCategories: {
+        type: Object,
+        default: () => ({}),
+    },
+    canRescheduleTermin: {
+        type: Boolean,
+        default: false,
+    },
+    fieldAudits: {
+        type: Array,
+        default: () => [],
+    },
+    isAdmin: {
+        type: Boolean,
+        default: false,
+    },
+    allUsers: {
+        type: Array,
+        default: () => [],
+    },
+    workflowNodes: {
+        type: Array,
+        default: () => [],
+    },
 });
 
-// Aktif Sekme Yönetimi: 'details' (varsayılan) | 'flow' | 'history'
+// Aktif Sekme Yönetimi: 'details' (varsayılan) | 'flow' | 'history' | 'sla_history' | 'audits'
 const activeTab = ref('details');
+
+// Yönetici Müdahale Kokpiti State
+const showReassignModal = ref(false);
+const reassignForm = useForm({
+    task_id: null,
+    new_user_id: '',
+    reason: '',
+});
+
+const showJumpNodeModal = ref(false);
+const jumpNodeForm = useForm({
+    target_node_id: '',
+    reason: '',
+});
+
+const showForceProgressModal = ref(false);
+const forceProgressForm = useForm({
+    task_id: null,
+    reason: '',
+});
+
+const openReassignModal = (taskId = null) => {
+    reassignForm.reset();
+    reassignForm.task_id = taskId || (props.instance.tasks && props.instance.tasks[0]?.id) || null;
+    showReassignModal.value = true;
+};
+
+const submitReassign = () => {
+    reassignForm.post(route('processes.admin.reassign', props.instance.id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            showReassignModal.value = false;
+        },
+    });
+};
+
+const openJumpNodeModal = () => {
+    jumpNodeForm.reset();
+    showJumpNodeModal.value = true;
+};
+
+const submitJumpNode = () => {
+    jumpNodeForm.post(route('processes.admin.jump-node', props.instance.id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            showJumpNodeModal.value = false;
+        },
+    });
+};
+
+const openForceProgressModal = (taskId = null) => {
+    forceProgressForm.reset();
+    forceProgressForm.task_id = taskId || (props.instance.tasks && props.instance.tasks[0]?.id) || null;
+    showForceProgressModal.value = true;
+};
+
+const submitForceProgress = () => {
+    forceProgressForm.post(route('processes.admin.force-progress', props.instance.id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            showForceProgressModal.value = false;
+        },
+    });
+};
 
 const nodes = ref([]);
 const edges = ref([]);
@@ -118,10 +214,12 @@ const formatDate = (value) => {
     return new Date(value).toLocaleString('tr-TR');
 };
 
-const isRejected = computed(() => props.instance.status === 'rejected');
-const isCancelled = computed(() => props.instance.status === 'cancelled');
+const hasPendingTasks = computed(() => (props.instance.tasks || []).some(t => t.status === 'pending'));
 const isCompleted = computed(() => props.instance.status === 'completed');
-const isActive = computed(() => !isCancelled.value && !isCompleted.value && !isRejected.value);
+const isCancelled = computed(() => props.instance.status === 'cancelled');
+const isRejected = computed(() => props.instance.status === 'rejected' && !hasPendingTasks.value);
+const isActive = computed(() => hasPendingTasks.value || (!isCancelled.value && !isCompleted.value && !isRejected.value));
+
 
 const isTravelWorkflow = computed(() => {
     const name = (props.instance.workflow?.name || '').toLocaleLowerCase('tr-TR');
@@ -133,6 +231,38 @@ const isSampleWorkflow = computed(() => {
     return name.includes('numune') || name.includes('levha') || name.includes('kalite');
 });
 
+const isRevisionTask = computed(() => {
+    if (!props.myPendingTask) return false;
+    if (props.myPendingTask.is_revision) return true;
+    if (props.instance.data?.isletme_karari === 'Revizyon İstendi') return true;
+    const title = (props.myPendingTask.title || props.myPendingTask.node_label || '').toLowerCase();
+    if (title.includes('reviz')) return true;
+    if (String(props.myPendingTask.node_id) === '1' || String(props.myPendingTask.node_id) === 'node_start') {
+        return (props.processHistory || []).some(h => (h.action || '').toLowerCase().includes('reviz')) ||
+               !!props.instance.data?.isletme_notu;
+    }
+    return false;
+});
+
+const isRevisionRequired = computed(() => {
+    return isRevisionTask.value ||
+        props.instance.data?.isletme_karari === 'Revizyon İstendi' ||
+        (props.processHistory || []).some(h => (h.action || '').toLowerCase().includes('reviz') && props.instance.status === 'waiting');
+});
+
+const revisionNote = computed(() => {
+    return props.myPendingTask?.latest_revision_note
+        || props.instance.data?.isletme_notu
+        || (props.processHistory || []).find(h => (h.action || '').toLowerCase().includes('reviz') && h.comment)?.comment
+        || null;
+});
+
+const revisionAuthor = computed(() => {
+    return props.myPendingTask?.latest_revision_user
+        || (props.processHistory || []).find(h => (h.action || '').toLowerCase().includes('reviz'))?.actor
+        || null;
+});
+
 const currentActiveStepTitle = computed(() => {
     if (props.instance.tasks && props.instance.tasks.length > 0) {
         const t = props.instance.tasks[0];
@@ -141,6 +271,55 @@ const currentActiveStepTitle = computed(() => {
     }
     return 'İşlem ve Onay';
 });
+
+const formatDateTR = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+        const parts = String(dateStr).split('-');
+        if (parts.length === 3 && parts[0].length === 4) {
+            return `${parts[2]}.${parts[1]}.${parts[0]}`;
+        }
+        return dateStr;
+    } catch {
+        return dateStr;
+    }
+};
+
+const formatFieldValue = (val) => {
+    if (val === false || val === 'false' || val === 0) return 'Hayır';
+    if (val === true || val === 'true' || val === 1) return 'Evet';
+    if (!val) return '-';
+
+    if (Array.isArray(val)) {
+        const formatted = val.map(item => {
+            if (typeof item === 'object' && item !== null) {
+                if (item.start || item.end) {
+                    const s = item.start ? formatDateTR(item.start) : '';
+                    const e = item.end ? formatDateTR(item.end) : '';
+                    const n = item.note ? ` (${item.note})` : '';
+                    return (s && e ? `📅 ${s} - ${e}` : (s ? `📅 Başlangıç: ${s}` : `📅 Bitiş: ${e}`)) + n;
+                }
+                return Object.values(item).filter(Boolean).join(' - ');
+            }
+            return String(item);
+        }).filter(Boolean);
+        return formatted.length > 0 ? formatted.join(', ') : '-';
+    }
+
+    if (typeof val === 'string') {
+        const trimmed = val.trim();
+        if (trimmed.startsWith('[{') && trimmed.endsWith('}]')) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                return formatFieldValue(parsed);
+            } catch (e) {
+                // keep string
+            }
+        }
+    }
+
+    return String(val);
+};
 
 // Doğrusal Süreç Yol Haritası (Linear Stepper) Hesaplama
 const processSteps = computed(() => {
@@ -206,7 +385,7 @@ const processSteps = computed(() => {
         let status = 'upcoming'; // 'completed' | 'current' | 'rejected' | 'upcoming'
         if (isCompleted.value) {
             status = 'completed';
-        } else if (isRejected.value && isCurrentlyActive) {
+        } else if (isRejected.value && (isCurrentlyActive || props.instance.current_node_id === node.id)) {
             status = 'rejected';
         } else if (isCancelled.value) {
             status = isCurrentlyActive ? 'cancelled' : (historyItem ? 'completed' : 'upcoming');
@@ -216,18 +395,33 @@ const processSteps = computed(() => {
             status = 'completed';
         }
 
+        let displayLabel = label;
         let subtitle = '';
         if (isStart) {
-            subtitle = props.instance.starter?.name ? `Başlatan: ${props.instance.starter.name}` : 'Talep Başlangıcı';
+            if (status === 'current' && isRevisionRequired.value) {
+                displayLabel = 'Talebi Revize Et';
+                subtitle = '🔄 Revizyon Bekleniyor';
+            } else {
+                subtitle = props.instance.starter?.name ? `Başlatan: ${props.instance.starter.name}` : 'Talep Başlangıcı';
+            }
         } else if (status === 'completed' && historyItem) {
             subtitle = `${historyItem.actor || 'Yetkili'} · ${formatDate(historyItem.at)}`;
         } else if (status === 'current') {
-            const pendingTask = pendingTasks.find(t => t.node_id === node.id);
-            if (pendingTask?.assigned_role) {
-                const roleName = pendingTask.assigned_role === 'Amir' ? 'Birim Amiri' : pendingTask.assigned_role === 'Müdür' ? 'Departman Müdürü' : pendingTask.assigned_role;
-                subtitle = `Bekleyen: ${roleName}`;
-            } else if (pendingTask?.assigned_user?.name) {
-                subtitle = `Bekleyen: ${pendingTask.assigned_user.name}`;
+            const pendingForThisNode = pendingTasks.filter(t => t.node_id === node.id);
+            if (pendingForThisNode.length > 1) {
+                const names = pendingForThisNode.map(t => t.assigned_user?.name || t.assigned_role || 'Yetkili').filter(Boolean);
+                const policyBadge = node.data?.approvalPolicy === 'all' ? '🤝 Konsensüs' : '⚡ İlk Onay';
+                subtitle = `${policyBadge}: ${names.join(', ')}`;
+            } else if (pendingForThisNode.length === 1) {
+                const pendingTask = pendingForThisNode[0];
+                if (pendingTask?.assigned_role) {
+                    const roleName = pendingTask.assigned_role === 'Amir' ? 'Birim Amiri' : pendingTask.assigned_role === 'Müdür' ? 'Departman Müdürü' : pendingTask.assigned_role;
+                    subtitle = `Bekleyen: ${roleName}`;
+                } else if (pendingTask?.assigned_user?.name) {
+                    subtitle = `Bekleyen: ${pendingTask.assigned_user.name}`;
+                } else {
+                    subtitle = 'İşlem Bekleniyor';
+                }
             } else {
                 subtitle = 'İşlem Bekleniyor';
             }
@@ -244,11 +438,12 @@ const processSteps = computed(() => {
         return {
             id: node.id,
             index: index + 1,
-            label,
+            label: displayLabel,
             status,
             subtitle,
             isStart,
-            isEnd
+            isEnd,
+            isRevision: isStart && status === 'current' && isRevisionRequired.value
         };
     });
 });
@@ -358,6 +553,47 @@ const goToHistoryPage = (page) => {
         historyPage.value = page;
     }
 };
+
+// --- ENTERPRISE TERMIN & SLA YÖNETİMİ ---
+const showRescheduleModal = ref(false);
+const rescheduleForm = useForm({
+    new_termin: '',
+    reason_category: 'raw_material',
+    reason_note: '',
+});
+
+const openRescheduleModal = () => {
+    rescheduleForm.new_termin = props.terminSla?.termin_text || '';
+    rescheduleForm.reason_category = 'raw_material';
+    rescheduleForm.reason_note = '';
+    showRescheduleModal.value = true;
+};
+
+const closeRescheduleModal = () => {
+    showRescheduleModal.value = false;
+    rescheduleForm.reset();
+};
+
+const applyReschedulePreset = (days) => {
+    const today = new Date();
+    const target = new Date();
+    target.setDate(today.getDate() + days);
+    
+    const pad = (n) => String(n).padStart(2, '0');
+    const todayStr = `${pad(today.getDate())}.${pad(today.getMonth() + 1)}.${today.getFullYear()}`;
+    const targetStr = `${pad(target.getDate())}.${pad(target.getMonth() + 1)}.${target.getFullYear()}`;
+    
+    rescheduleForm.new_termin = `${todayStr} - ${targetStr}`;
+};
+
+const submitReschedule = () => {
+    rescheduleForm.post(route('processes.reschedule-termin', props.instance.id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            showRescheduleModal.value = false;
+        },
+    });
+};
 </script>
 
 <template>
@@ -452,9 +688,55 @@ const goToHistoryPage = (page) => {
 
                 <!-- 1. AKILLI REHBERLİK & AKSİYON KARTI (HERO GUIDANCE BANNER) -->
                 
-                <!-- DURUM A: SIRA SİZDE! (Kullanıcının üzerinde bekleyen görev var) -->
+                <!-- DURUM 0: SIRA SİZDE & REVİZYON TALEBİ -->
                 <div
-                    v-if="myPendingTask"
+                    v-if="isRevisionTask"
+                    class="rounded-2xl p-6 sm:p-7 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 text-white shadow-xl shadow-orange-600/25 border-2 border-amber-300 relative overflow-hidden"
+                >
+                    <div class="absolute -right-8 -bottom-8 w-48 h-48 rounded-full bg-white/10 blur-2xl pointer-events-none"></div>
+
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+                        <div class="flex items-start gap-4">
+                            <div class="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-3xl shrink-0 shadow-inner">
+                                🔄
+                            </div>
+                            <div>
+                                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/25 text-white text-xs font-black tracking-wide uppercase mb-2">
+                                    <span class="w-2 h-2 rounded-full bg-yellow-200 animate-ping"></span>
+                                    DÜZELTME & REVİZYON İSTENDİ
+                                </div>
+                                <h3 class="text-xl sm:text-2xl font-black text-white">
+                                    Talebiniz İçin Revizyon / Düzeltme İstendi
+                                </h3>
+                                <p class="text-amber-50 text-sm mt-1 max-w-2xl leading-relaxed">
+                                    Yetkili başvurunuzu incelemiş ve düzeltme yapılmasını istemiştir. Lütfen iletilen gerekçeyi dikkate alarak formu güncelleyip tekrar onaya gönderiniz.
+                                </p>
+                                <div v-if="revisionNote" class="mt-3 p-3.5 rounded-xl bg-white/15 border border-white/30 backdrop-blur-sm max-w-2xl">
+                                    <div class="text-xs font-bold text-amber-100 uppercase tracking-wider mb-0.5">
+                                        📌 İletilen Revizyon Gerekçesi {{ revisionAuthor ? `(${revisionAuthor})` : '' }}:
+                                    </div>
+                                    <div class="text-sm font-semibold text-white italic">
+                                        "{{ revisionNote }}"
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-3 shrink-0">
+                            <Link
+                                :href="route('tasks.show', myPendingTask.id)"
+                                class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl text-base font-black text-orange-950 bg-white hover:bg-orange-50 shadow-2xl hover:shadow-white/25 transform hover:-translate-y-0.5 active:translate-y-0 transition-all"
+                            >
+                                <span>✏️ Talebi Düzenle ve Yeniden Gönder</span>
+                                <span class="text-xl leading-none">&rarr;</span>
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DURUM A: SIRA SİZDE! (Kullanıcının üzerinde bekleyen normal görev var) -->
+                <div
+                    v-else-if="myPendingTask"
                     class="rounded-2xl p-6 sm:p-7 bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-700 text-white shadow-xl shadow-emerald-700/20 border border-emerald-400/30 relative overflow-hidden"
                 >
                     <div class="absolute -right-8 -bottom-8 w-48 h-48 rounded-full bg-white/10 blur-2xl pointer-events-none"></div>
@@ -644,6 +926,107 @@ const goToHistoryPage = (page) => {
                     </div>
                 </div>
 
+                <!-- ENTERPRISE TERMIN & SLA HERO MONITOR (Fortune 500 Grade) -->
+                <div
+                    v-if="terminSla && terminSla.has_termin"
+                    class="rounded-2xl bg-white border border-slate-200/90 shadow-sm p-6 relative overflow-hidden transition-all duration-300 hover:shadow-md"
+                >
+                    <!-- Üst Başlık & Trafik Lambası -->
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-100 pb-4">
+                        <div class="flex items-center gap-3">
+                            <!-- Trafik Lambası Işığı -->
+                            <div class="relative flex items-center justify-center">
+                                <span
+                                    v-if="terminSla.traffic_light === 'green'"
+                                    class="w-4 h-4 rounded-full bg-emerald-500 shadow-md shadow-emerald-500/50"
+                                ></span>
+                                <span
+                                    v-else-if="terminSla.traffic_light === 'amber'"
+                                    class="w-4 h-4 rounded-full bg-amber-500 animate-ping shadow-md shadow-amber-500/50"
+                                ></span>
+                                <span
+                                    v-else-if="terminSla.traffic_light === 'red' || terminSla.traffic_light === 'critical-red'"
+                                    class="w-4 h-4 rounded-full bg-rose-600 animate-pulse shadow-md shadow-rose-600/50"
+                                ></span>
+                                <span v-else class="w-4 h-4 rounded-full bg-gray-400"></span>
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs font-black tracking-wider uppercase text-slate-500">
+                                        KURUMSAL TERMIN & SLA TAAHHÜT MONİTÖRÜ
+                                    </span>
+                                    <span v-if="terminSla.revisions_count > 0" class="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                        {{ terminSla.revisions_count }} Kez Revize Edildi
+                                    </span>
+                                </div>
+                                <h3 class="text-lg font-extrabold text-slate-900 mt-0.5 flex items-center gap-2">
+                                    <span>📅 Taahhüt Edilen Termin:</span>
+                                    <span class="font-mono text-indigo-700 font-black">{{ terminSla.termin_text }}</span>
+                                </h3>
+                            </div>
+                        </div>
+
+                        <!-- Canlı SLA Rozeti & Aksiyon Butonu -->
+                        <div class="flex flex-wrap items-center gap-3 shrink-0">
+                            <!-- Durum Rozeti -->
+                            <span
+                                :class="[
+                                    'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black border shadow-xs transition-all',
+                                    terminSla.badge_color
+                                ]"
+                            >
+                                <span>{{ terminSla.badge_title }}</span>
+                            </span>
+
+                            <!-- Termini Revize Et Butonu -->
+                            <button
+                                v-if="canRescheduleTermin && !isCompleted && !isRejected"
+                                type="button"
+                                @click="openRescheduleModal"
+                                class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-all hover:scale-105 shadow-xs"
+                                title="İşletme aksaklıklarında gerekçeli resmi erteleme bildirimi yap"
+                            >
+                                <span>🔄</span>
+                                <span>Termini Ertele / Revize Et</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 3'lü KPI Göstergesi -->
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4 pt-1">
+                        <div class="p-3.5 rounded-xl bg-slate-50/80 border border-slate-100">
+                            <span class="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Nihai Teslim Hedefi (Deadline)</span>
+                            <div class="text-sm font-black text-slate-900 mt-1 flex items-center gap-1.5 font-mono">
+                                <span>🎯</span> {{ terminSla.target_date_formatted }}
+                            </div>
+                            <span class="block text-[11px] text-slate-500 mt-0.5">Fabrika çıkış taahhüt tarihi</span>
+                        </div>
+
+                        <div class="p-3.5 rounded-xl bg-slate-50/80 border border-slate-100">
+                            <span class="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Kalan Süre / Performans</span>
+                            <div class="text-sm font-black mt-1 flex items-center gap-1.5" :class="terminSla.is_overdue ? 'text-rose-600' : 'text-emerald-700'">
+                                <span v-if="terminSla.is_completed">
+                                    {{ terminSla.was_on_time ? '✓ Zamanında Tamamlandı' : `⚠️ +${terminSla.delay_days} Gün Gecikmeyle` }}
+                                </span>
+                                <span v-else>
+                                    {{ terminSla.is_overdue ? `⛔ ${Math.abs(terminSla.days_remaining)} Gün Gecikmede` : `⏳ Kalan: ${terminSla.days_remaining} Gün (${terminSla.hours_remaining} Saat)` }}
+                                </span>
+                            </div>
+                            <span class="block text-[11px] text-slate-500 mt-0.5">SLA eşik denetimi</span>
+                        </div>
+
+                        <div class="p-3.5 rounded-xl bg-slate-50/80 border border-slate-100">
+                            <span class="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Müşteri Şeffaflığı & OTIF</span>
+                            <div class="text-sm font-black text-indigo-700 mt-1 flex items-center gap-1.5">
+                                <span>🏢</span> {{ instance.data?.musteri_adi || 'Köksan Müşterisi' }}
+                            </div>
+                            <span class="block text-[11px] text-slate-500 mt-0.5">
+                                {{ terminRevisions.length > 0 ? `Son Değişiklik: ${terminRevisions[0]?.reason_category}` : 'İlk taahhüt geçerli' }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 2. DOĞRUSAL SÜREÇ YOL HARİTASI (LINEAR PROCESS STEPPER) -->
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-200/80 p-6 sm:p-8 overflow-hidden">
                     <div class="flex items-center justify-between mb-6 border-b border-gray-100 pb-4">
@@ -653,8 +1036,8 @@ const goToHistoryPage = (page) => {
                             </h3>
                             <p class="text-xs text-gray-500 mt-0.5">Talebin geçtiği ve sırada bekleyen aşamaları gösterir.</p>
                         </div>
-                        <span class="text-xs font-semibold px-3 py-1 rounded-full" :class="isCompleted ? 'bg-green-100 text-green-800' : (isRejected ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800')">
-                            {{ isCompleted ? 'Tamamlandı' : (isRejected ? 'Reddedildi' : (isCancelled ? 'İptal' : 'İlerliyor')) }}
+                        <span class="text-xs font-semibold px-3 py-1 rounded-full" :class="isCompleted ? 'bg-green-100 text-green-800' : (isRejected ? 'bg-red-100 text-red-800' : (isRevisionRequired ? 'bg-orange-100 text-orange-800 font-black border border-orange-300' : 'bg-blue-100 text-blue-800'))">
+                            {{ isCompleted ? 'Tamamlandı' : (isRejected ? 'Reddedildi' : (isCancelled ? 'İptal' : (isRevisionRequired ? '🔄 Revizyon Bekleniyor' : 'İlerliyor'))) }}
                         </span>
                     </div>
 
@@ -675,14 +1058,17 @@ const goToHistoryPage = (page) => {
                                     :class="[
                                         step.status === 'completed'
                                             ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 ring-4 ring-emerald-50'
-                                            : (step.status === 'current'
-                                                ? 'bg-amber-500 text-white shadow-xl shadow-amber-500/40 ring-4 ring-amber-100 animate-pulse'
-                                                : (step.status === 'rejected'
-                                                    ? 'bg-red-600 text-white ring-4 ring-red-50'
-                                                    : 'bg-white border-2 border-gray-300 text-gray-400'))
+                                            : (step.isRevision
+                                                ? 'bg-orange-500 text-white shadow-xl shadow-orange-500/40 ring-4 ring-orange-100 animate-pulse'
+                                                : (step.status === 'current'
+                                                    ? 'bg-amber-500 text-white shadow-xl shadow-amber-500/40 ring-4 ring-amber-100 animate-pulse'
+                                                    : (step.status === 'rejected'
+                                                        ? 'bg-red-600 text-white ring-4 ring-red-50'
+                                                        : 'bg-white border-2 border-gray-300 text-gray-400')))
                                     ]"
                                 >
                                     <span v-if="step.status === 'completed'">✓</span>
+                                    <span v-else-if="step.isRevision">🔄</span>
                                     <span v-else-if="step.status === 'current'">⏳</span>
                                     <span v-else-if="step.status === 'rejected'">✕</span>
                                     <span v-else>{{ step.index }}</span>
@@ -709,14 +1095,64 @@ const goToHistoryPage = (page) => {
                     </div>
                 </div>
 
+                <!-- YÖNETİCİ SÜREÇ MÜDAHALE KOKPİTİ (PROCESS ADMIN COCKPIT) -->
+                <div
+                    v-if="isAdmin && !isCompleted && !isCancelled"
+                    class="rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 p-5 shadow-xl text-white relative overflow-hidden"
+                >
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center text-xl font-black">
+                                ⚡
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[10px] font-black tracking-widest uppercase px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                        ADMIN INTERVENTION COCKPIT
+                                    </span>
+                                    <span class="text-xs text-slate-400">Yönetici Müdahale Yetkisi</span>
+                                </div>
+                                <h4 class="text-base font-extrabold text-white mt-0.5">
+                                    Süreç Operasyonel Müdahale Merkezi
+                                </h4>
+                            </div>
+                        </div>
+
+                        <!-- 3 Müdahale Butonu -->
+                        <div class="flex flex-wrap items-center gap-2.5">
+                            <button
+                                type="button"
+                                @click="openReassignModal()"
+                                class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-600 transition-all hover:scale-105 shadow-md"
+                            >
+                                <span>👤</span> Görevi Yeniden Ata
+                            </button>
+                            <button
+                                type="button"
+                                @click="openJumpNodeModal"
+                                class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-indigo-900/80 hover:bg-indigo-800 border border-indigo-600/50 transition-all hover:scale-105 shadow-md"
+                            >
+                                <span>🔀</span> Adım Değiştir / Taşı
+                            </button>
+                            <button
+                                type="button"
+                                @click="openForceProgressModal()"
+                                class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-black text-amber-950 bg-amber-400 hover:bg-amber-300 transition-all hover:scale-105 shadow-lg shadow-amber-400/20"
+                            >
+                                <span>⏩</span> Zorla İlerlet (Force)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 3. KULLANICI DOSTU SEKMELİ İÇERİK (TABS) -->
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-200/80 overflow-hidden">
                     <!-- Sekme Başlıkları -->
-                    <div class="flex items-center border-b border-gray-200 bg-gray-50/75 px-4 sm:px-6">
+                    <div class="flex items-center border-b border-gray-200 bg-gray-50/75 px-4 sm:px-6 overflow-x-auto">
                         <button
                             type="button"
                             @click="activeTab = 'details'"
-                            class="px-5 py-4 text-sm font-bold border-b-2 flex items-center gap-2 transition-all"
+                            class="px-5 py-4 text-sm font-bold border-b-2 flex items-center gap-2 transition-all whitespace-nowrap"
                             :class="activeTab === 'details' ? 'border-indigo-600 text-indigo-600 bg-white shadow-sm' : 'border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-100/50'"
                         >
                             <span>📋</span> Talep Bilgileri & Başvuru Detayları
@@ -725,7 +1161,7 @@ const goToHistoryPage = (page) => {
                         <button
                             type="button"
                             @click="activeTab = 'flow'"
-                            class="px-5 py-4 text-sm font-bold border-b-2 flex items-center gap-2 transition-all"
+                            class="px-5 py-4 text-sm font-bold border-b-2 flex items-center gap-2 transition-all whitespace-nowrap"
                             :class="activeTab === 'flow' ? 'border-indigo-600 text-indigo-600 bg-white shadow-sm' : 'border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-100/50'"
                         >
                             <span>🗺️</span> Canlı Akış Şeması (BPMN / Şema)
@@ -734,10 +1170,32 @@ const goToHistoryPage = (page) => {
                         <button
                             type="button"
                             @click="activeTab = 'history'"
-                            class="px-5 py-4 text-sm font-bold border-b-2 flex items-center gap-2 transition-all"
+                            class="px-5 py-4 text-sm font-bold border-b-2 flex items-center gap-2 transition-all whitespace-nowrap"
                             :class="activeTab === 'history' ? 'border-indigo-600 text-indigo-600 bg-white shadow-sm' : 'border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-100/50'"
                         >
                             <span>📜</span> İşlem Geçmişi & Onaylar ({{ processHistory.length }})
+                        </button>
+
+                        <button
+                            type="button"
+                            @click="activeTab = 'audits'"
+                            class="px-5 py-4 text-sm font-bold border-b-2 flex items-center gap-2 transition-all whitespace-nowrap"
+                            :class="activeTab === 'audits' ? 'border-indigo-600 text-indigo-600 bg-white shadow-sm' : 'border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-100/50'"
+                        >
+                            <span>🔍</span> Değişiklik Günlüğü (Audit)
+                            <span v-if="fieldAudits.length > 0" class="px-2 py-0.5 rounded-full text-xs font-black bg-indigo-100 text-indigo-700">
+                                {{ fieldAudits.length }}
+                            </span>
+                        </button>
+
+                        <button
+                            v-if="terminRevisions.length > 0 || (terminSla && terminSla.has_termin)"
+                            type="button"
+                            @click="activeTab = 'sla_history'"
+                            class="px-5 py-4 text-sm font-bold border-b-2 flex items-center gap-2 transition-all whitespace-nowrap"
+                            :class="activeTab === 'sla_history' ? 'border-indigo-600 text-indigo-600 bg-white shadow-sm' : 'border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-100/50'"
+                        >
+                            <span>⏱️</span> Termin & SLA Geçmişi ({{ terminRevisions.length }})
                         </button>
                     </div>
 
@@ -781,7 +1239,7 @@ const goToHistoryPage = (page) => {
                                         {{ getFieldLabel(key) }}
                                     </span>
                                     <span class="block text-sm font-bold text-gray-900 break-words">
-                                        {{ value === false || value === 'false' || value === 0 ? 'Hayır' : (value === true || value === 'true' || value === 1 ? 'Evet' : (value || '-')) }}
+                                        {{ formatFieldValue(value) }}
                                     </span>
                                 </div>
                             </div>
@@ -920,6 +1378,242 @@ const goToHistoryPage = (page) => {
                             </div>
                         </div>
                     </div>
+
+                    <!-- SEKME 4: TERMIN & SLA REVIZYON GECMISI -->
+                    <div v-show="activeTab === 'sla_history'" class="p-6 sm:p-8 space-y-6">
+                        <div class="flex items-center justify-between border-b border-gray-100 pb-4">
+                            <div>
+                                <h4 class="text-base font-bold text-gray-900 flex items-center gap-2">
+                                    <span>⏱️</span> Termin & SLA Revizyon Denetim Günlüğü
+                                </h4>
+                                <p class="text-xs text-gray-500 mt-0.5">
+                                    Bu talebe ait tüm termin taahhüt değişiklikleri ve fabrika gecikme gerekçeleri kayıtlıdır.
+                                </p>
+                            </div>
+                            <span class="px-3 py-1 rounded-full text-xs font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
+                                Toplam: {{ terminRevisions.length }} Revizyon
+                            </span>
+                        </div>
+
+                        <div v-if="terminRevisions.length === 0" class="text-center py-12 bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+                            <span class="text-3xl block mb-2">🟢</span>
+                            <h5 class="text-sm font-bold text-gray-800">Hiç Termin Revizyonu Yapılmadı</h5>
+                            <p class="text-xs text-gray-500 mt-1 max-w-md mx-auto">
+                                Süreç, işletmenin belirlediği ilk termin taahhüdüyle ({{ terminSla?.termin_text || 'İlk Termin' }}) zamanında ilerlemektedir.
+                            </p>
+                        </div>
+
+                        <div v-else class="space-y-4">
+                            <div
+                                v-for="(rev, idx) in terminRevisions"
+                                :key="rev.id"
+                                class="rounded-xl border border-slate-200/90 bg-white p-5 shadow-xs transition-all hover:border-indigo-200"
+                            >
+                                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 pb-3 mb-3">
+                                    <div class="flex items-center gap-2.5">
+                                        <span class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-700 font-mono text-xs font-black flex items-center justify-center shrink-0">
+                                            #{{ terminRevisions.length - idx }}
+                                        </span>
+                                        <div>
+                                            <span class="text-xs font-bold text-gray-900">{{ rev.requested_by?.name || 'İşletme Yetkilisi' }}</span>
+                                            <span class="text-[11px] text-gray-400 ml-2">{{ formatDate(rev.created_at) }}</span>
+                                        </div>
+                                    </div>
+                                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                        <span>🏷️</span> {{ rev.reason_category ? (terminCategories[rev.reason_category]?.label || rev.reason_category) : 'Genel Revizyon' }}
+                                    </span>
+                                </div>
+
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3 p-3 bg-slate-50/70 rounded-lg text-xs">
+                                    <div>
+                                        <span class="text-slate-400 font-semibold block uppercase text-[10px]">Önceki Termin</span>
+                                        <span class="font-mono text-slate-700 font-bold mt-0.5 block line-through">{{ rev.previous_termin || 'Belirtilmedi' }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-slate-400 font-semibold block uppercase text-[10px]">Revize Edilen Yeni Termin</span>
+                                        <span class="font-mono text-indigo-700 font-black mt-0.5 block">➔ {{ rev.new_termin }}</span>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <span class="text-[11px] font-bold text-gray-500 uppercase block mb-1">Açıklama / Gerekçe Notu:</span>
+                                    <p class="text-xs text-gray-800 whitespace-pre-wrap leading-relaxed bg-white p-3 rounded-lg border border-gray-100">
+                                        {{ rev.reason_note }}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SEKME 5: ALAN BAZLI DEĞİŞİKLİK GÜNLÜĞÜ (AUDIT DIFF) -->
+                    <div v-show="activeTab === 'audits'" class="p-6 sm:p-8 space-y-6">
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-100 pb-4">
+                            <div>
+                                <h4 class="text-base font-extrabold text-gray-900 flex items-center gap-2">
+                                    <span>🔍</span> Alan Bazlı Denetim İzi & Değişiklik Günlüğü (Audit Diff)
+                                </h4>
+                                <p class="text-xs text-gray-500 mt-0.5">
+                                    Süreç boyunca yapılan her revizyon, form güncellemesi ve yönetici müdahalesi burada satır satır denetlenir.
+                                </p>
+                            </div>
+                            <span class="px-3 py-1 rounded-full text-xs font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                Toplam: {{ fieldAudits.length }} Kayıt
+                            </span>
+                        </div>
+
+                        <!-- Boş Durum -->
+                        <div v-if="fieldAudits.length === 0" class="text-center py-12 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200">
+                            <span class="text-4xl block mb-2">🛡️</span>
+                            <h5 class="text-sm font-bold text-gray-800">Hiçbir Alanda Değişiklik Yapılmadı</h5>
+                            <p class="text-xs text-gray-500 mt-1 max-w-md mx-auto">
+                                Talep ilk başvuru verileriyle yürütülmektedir. Henüz bir revizyon, veri güncellemesi veya yönetici müdahalesi kaydedilmedi.
+                            </p>
+                        </div>
+
+                        <!-- Değişiklik Kartları Listesi -->
+                        <div v-else class="space-y-4">
+                            <div
+                                v-for="audit in fieldAudits"
+                                :key="audit.id"
+                                class="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs hover:shadow-md transition-all hover:border-indigo-200"
+                            >
+                                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 pb-3 mb-3">
+                                    <div class="flex items-center gap-2.5">
+                                        <span
+                                            v-if="audit.event_type === 'revision'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1"
+                                        >
+                                            <span>🔄</span> Revizyon Güncellemesi
+                                        </span>
+                                        <span
+                                            v-else-if="audit.event_type === 'admin_reassign'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1"
+                                        >
+                                            <span>👤</span> Görev Yeniden Atandı
+                                        </span>
+                                        <span
+                                            v-else-if="audit.event_type === 'admin_jump'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1"
+                                        >
+                                            <span>🔀</span> Adım Değiştirildi
+                                        </span>
+                                        <span
+                                            v-else-if="audit.event_type === 'admin_force'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1"
+                                        >
+                                            <span>⏩</span> Zorla İlerletildi
+                                        </span>
+                                        <span
+                                            v-else-if="audit.event_type === 'sod_escalation'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 flex items-center gap-1"
+                                        >
+                                            <span>🛡️</span> 4-Göz İlkesi (SoD Eskalasyon)
+                                        </span>
+                                        <span
+                                            v-else-if="audit.event_type === 'doa_bypass'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-teal-50 text-teal-800 border border-teal-200 flex items-center gap-1"
+                                        >
+                                            <span>⚡</span> DoA Finansal Yetki Matrisi
+                                        </span>
+                                        <span
+                                            v-else-if="audit.event_type === 'parallel_fork'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 flex items-center gap-1"
+                                        >
+                                            <span>🔀</span> Paralel Dallanma (AND-Fork)
+                                        </span>
+                                        <span
+                                            v-else-if="audit.event_type === 'parallel_join_wait'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1"
+                                        >
+                                            <span>⏳</span> Paralel Birleşme Beklemesi
+                                        </span>
+                                        <span
+                                            v-else-if="audit.event_type === 'parallel_join_sync'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1"
+                                        >
+                                            <span>🔗</span> Paralel Kollar Senkronize Edildi
+                                        </span>
+                                        <span
+                                            v-else-if="audit.event_type === 'boundary_timer_escalate'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-800 border border-rose-200 flex items-center gap-1"
+                                        >
+                                            <span>⏱️</span> Boundary Timer Eskalasyonu
+                                        </span>
+                                        <span
+                                            v-else-if="audit.event_type === 'boundary_timer_auto_approve'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-teal-50 text-teal-800 border border-teal-200 flex items-center gap-1"
+                                        >
+                                            <span>⚡</span> Boundary Timer Otomatik Onay
+                                        </span>
+                                        <span
+                                            v-else-if="audit.event_type === 'workflow_migration'"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-50 text-purple-800 border border-purple-200 flex items-center gap-1"
+                                        >
+                                            <span>🔄</span> Canlı Süreç Versiyon Göçü (Schema Migration)
+                                        </span>
+                                        <span
+                                            v-else
+                                            class="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1"
+                                        >
+                                            <span>✏️</span> Form Düzenlemesi
+                                        </span>
+
+                                        <span class="text-xs font-bold text-gray-900">{{ audit.user?.name || 'Sistem' }}</span>
+                                        <span class="text-[11px] text-gray-400">· {{ formatDate(audit.created_at) }}</span>
+                                    </div>
+
+                                    <span v-if="audit.task" class="text-xs text-gray-500 font-mono">
+                                        Görev: {{ audit.task.title }}
+                                    </span>
+                                </div>
+
+                                <!-- Alan Başlığı -->
+                                <div class="mb-3">
+                                    <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">Değişen Alan / İşlem:</span>
+                                    <h5 class="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                                        <span>🏷️</span>
+                                        <span>{{ audit.field_label || audit.field_key }}</span>
+                                        <span class="text-[11px] font-mono text-slate-400 font-normal">({{ audit.field_key }})</span>
+                                    </h5>
+                                </div>
+
+                                <!-- Yan Yana Git Stili Değer Karşılaştırması (Git-style Diff) -->
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 p-3.5 bg-slate-50/80 rounded-xl border border-slate-100">
+                                    <!-- Eski Değer -->
+                                    <div class="p-3 rounded-lg bg-red-50/60 border border-red-200/80">
+                                        <div class="flex items-center justify-between text-[11px] font-bold text-red-800 mb-1">
+                                            <span class="flex items-center gap-1">
+                                                <span>➖</span> Eski Değer
+                                            </span>
+                                            <span class="text-[10px] text-red-600 uppercase font-mono">Previous</span>
+                                        </div>
+                                        <div class="text-xs font-mono text-red-950 font-semibold break-words whitespace-pre-wrap line-through">
+                                            {{ audit.old_value || '(Boş / Tanımsız)' }}
+                                        </div>
+                                    </div>
+
+                                    <!-- Yeni Değer -->
+                                    <div class="p-3 rounded-lg bg-emerald-50/60 border border-emerald-200/80">
+                                        <div class="flex items-center justify-between text-[11px] font-bold text-emerald-800 mb-1">
+                                            <span class="flex items-center gap-1">
+                                                <span>➕</span> Yeni Değer
+                                            </span>
+                                            <span class="text-[10px] text-emerald-600 uppercase font-mono">Updated</span>
+                                        </div>
+                                        <div class="text-xs font-mono text-emerald-950 font-extrabold break-words whitespace-pre-wrap">
+                                            {{ audit.new_value || '(Boş / Silindi)' }}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Gerekçe / Not -->
+                                <div v-if="audit.comment" class="mt-3 text-xs bg-white p-3 rounded-xl border border-gray-100 text-gray-700">
+                                    <span class="font-bold text-gray-500 uppercase text-[10px] block mb-0.5">Açıklama / Gerekçe:</span>
+                                    <span class="italic text-gray-800">{{ audit.comment }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
             </div>
@@ -963,6 +1657,400 @@ const goToHistoryPage = (page) => {
                         class="px-5 py-2 text-xs font-bold text-white bg-red-600 rounded-xl hover:bg-red-700 shadow-sm disabled:opacity-50"
                     >
                         {{ cancelForm.processing ? 'İptal Ediliyor...' : 'Evet, Süreci İptal Et' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- TERMIN REVIZYON & ERTELEME MODALI (Fortune 500 Reschedule Matrix) -->
+        <div
+            v-if="showRescheduleModal"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm"
+            @click.self="closeRescheduleModal"
+        >
+            <div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+                <div class="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-indigo-50/50 flex items-center justify-between">
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                            <span>📅</span> Termin Taahhüdü Revizyonu
+                        </h3>
+                        <p class="text-xs text-gray-500 mt-1">
+                            Aksaklık durumunda gerekçeli resmi tarih güncellemesi yapılır ve satış departmanına iletilir.
+                        </p>
+                    </div>
+                    <button type="button" @click="closeRescheduleModal" class="text-gray-400 hover:text-gray-600 p-1 rounded-lg">✕</button>
+                </div>
+
+                <div class="p-6 space-y-4">
+                    <!-- Mevcut Termin Bilgisi -->
+                    <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs flex items-center justify-between">
+                        <span class="text-slate-500 font-medium">Mevcut Taahhüt:</span>
+                        <strong class="font-mono text-indigo-700 text-sm">{{ terminSla?.termin_text || 'Belirtilmedi' }}</strong>
+                    </div>
+
+                    <!-- Yeni Termin Girişi & Hızlı Presetler -->
+                    <div>
+                        <div class="flex items-center justify-between mb-1.5">
+                            <label class="block text-xs font-bold text-gray-700 uppercase">
+                                Yeni Termin Aralığı / Tarihi <strong class="text-red-500">*</strong>
+                            </label>
+                            <span class="text-[11px] text-gray-500">Hızlı Preset:</span>
+                        </div>
+                        <div class="flex items-center gap-2 mb-2">
+                            <button
+                                type="button"
+                                @click="applyReschedulePreset(3)"
+                                class="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                            >
+                                +3 Gün
+                            </button>
+                            <button
+                                type="button"
+                                @click="applyReschedulePreset(7)"
+                                class="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors"
+                            >
+                                +7 Gün (1 Hafta)
+                            </button>
+                            <button
+                                type="button"
+                                @click="applyReschedulePreset(14)"
+                                class="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 transition-colors"
+                            >
+                                +14 Gün (2 Hafta)
+                            </button>
+                        </div>
+                        <input
+                            v-model="rescheduleForm.new_termin"
+                            type="text"
+                            placeholder="Örn: 28.10.2026 - 04.11.2026"
+                            class="w-full rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm font-mono"
+                        />
+                        <p v-if="rescheduleForm.errors.new_termin" class="text-xs text-red-600 mt-1">{{ rescheduleForm.errors.new_termin }}</p>
+                    </div>
+
+                    <!-- Gecikme Gerekçe Kategorisi (Standart Fortune 500) -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5">
+                            Revizyon / Gecikme Gerekçesi <strong class="text-red-500">*</strong>
+                        </label>
+                        <select
+                            v-model="rescheduleForm.reason_category"
+                            class="w-full rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                        >
+                            <option value="raw_material">📦 Hammadde / Malzeme Tedarik Gecikmesi</option>
+                            <option value="machine_breakdown">⚙️ Ekstrüzyon / Makine Hattı Arızası & Bakım</option>
+                            <option value="mold_change">🔧 Kalıp Değişimi & Ayar Süresi</option>
+                            <option value="quality_retest">🔬 Laboratuvar / Kalite Test Tekrarı</option>
+                            <option value="customer_change">🤝 Müşteri Talebi / Spesifikasyon Değişikliği</option>
+                            <option value="other">📝 Diğer Operasyonel Gerekçe</option>
+                        </select>
+                    </div>
+
+                    <!-- Açıklama Notu -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5">
+                            Detaylı Açıklama <strong class="text-red-500">*</strong>
+                        </label>
+                        <textarea
+                            v-model="rescheduleForm.reason_note"
+                            rows="3"
+                            class="w-full rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                            placeholder="Gecikmenin teknik veya lojistik nedenini detaylandırınız..."
+                        />
+                        <p v-if="rescheduleForm.errors.reason_note" class="text-xs text-red-600 mt-1">{{ rescheduleForm.errors.reason_note }}</p>
+                    </div>
+
+                    <!-- Kurumsal Bilgi Kutusu -->
+                    <div class="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+                        <span class="text-base shrink-0">💡</span>
+                        <span>Bu revizyon, satış departmanına ({{ instance.starter?.name || 'Satışçı' }}) anında bildirim ve e-posta olarak iletilir. Resmi SLA denetiminde kayıt altına alınır.</span>
+                    </div>
+                </div>
+
+                <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
+                    <button
+                        type="button"
+                        @click="closeRescheduleModal"
+                        class="px-4 py-2 text-xs font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-100"
+                    >
+                        Vazgeç
+                    </button>
+                    <button
+                        type="button"
+                        @click="submitReschedule"
+                        :disabled="rescheduleForm.processing"
+                        class="px-5 py-2 text-xs font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 shadow-sm disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                        <span>✓</span>
+                        <span>{{ rescheduleForm.processing ? 'Kaydediliyor...' : 'Termin Revizyonunu Onayla' }}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 1. ADMIN MODAL: GÖREVİ YENİDEN ATA (REASSIGN TASK) -->
+        <div
+            v-if="showReassignModal"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            @click.self="showReassignModal = false"
+        >
+            <div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+                <div class="px-6 py-5 border-b border-gray-100 bg-slate-900 text-white flex items-center justify-between">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-amber-400 text-lg">👤</span>
+                            <h3 class="text-base font-extrabold text-white">Görevi Başka Personele Yeniden Ata</h3>
+                        </div>
+                        <p class="text-xs text-slate-300 mt-0.5">
+                            İlgili personelin izinli veya meşgul olduğu durumlarda görevi devredin.
+                        </p>
+                    </div>
+                    <button @click="showReassignModal = false" class="text-slate-400 hover:text-white text-xl">&times;</button>
+                </div>
+
+                <div class="p-6 space-y-4">
+                    <!-- Görev Seçimi -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">
+                            Atanacak Bekleyen Görev <strong class="text-red-500">*</strong>
+                        </label>
+                        <select
+                            v-model="reassignForm.task_id"
+                            class="w-full rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                        >
+                            <option
+                                v-for="t in (instance.tasks || []).filter(task => task.status === 'pending')"
+                                :key="t.id"
+                                :value="t.id"
+                            >
+                                #{{ t.id }} - {{ t.title || t.node_label || 'Onay/Form Görevi' }} (Şu an: {{ t.assigned_user?.name || t.assigned_role || 'Atanmamış' }})
+                            </option>
+                        </select>
+                        <p v-if="reassignForm.errors.task_id" class="text-xs text-red-600 mt-1">{{ reassignForm.errors.task_id }}</p>
+                    </div>
+
+                    <!-- Yeni Kullanıcı Seçimi -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">
+                            Yeni Görevli Personel <strong class="text-red-500">*</strong>
+                        </label>
+                        <select
+                            v-model="reassignForm.new_user_id"
+                            class="w-full rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                        >
+                            <option value="">Lütfen personel seçiniz...</option>
+                            <option
+                                v-for="u in allUsers"
+                                :key="u.id"
+                                :value="u.id"
+                            >
+                                {{ u.name }} ({{ u.department?.name || 'Departmansız' }} - {{ u.email }})
+                            </option>
+                        </select>
+                        <p v-if="reassignForm.errors.new_user_id" class="text-xs text-red-600 mt-1">{{ reassignForm.errors.new_user_id }}</p>
+                    </div>
+
+                    <!-- Gerekçe -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">
+                            Yeniden Atama Gerekçesi <strong class="text-red-500">*</strong>
+                        </label>
+                        <textarea
+                            v-model="reassignForm.reason"
+                            rows="3"
+                            class="w-full rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                            placeholder="Örn: Personel yıllık izinde olduğu için görev işletme müdürüne aktarılmıştır."
+                        />
+                        <p v-if="reassignForm.errors.reason" class="text-xs text-red-600 mt-1">{{ reassignForm.errors.reason }}</p>
+                    </div>
+
+                    <div class="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                        <span class="text-base shrink-0">💡</span>
+                        <span>Bu atama değişikliği yeni personele anında sistem içi bildirim olarak gönderilir ve süreç denetim izine kaydedilir.</span>
+                    </div>
+                </div>
+
+                <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
+                    <button
+                        type="button"
+                        @click="showReassignModal = false"
+                        class="px-4 py-2 text-xs font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-100"
+                    >
+                        Vazgeç
+                    </button>
+                    <button
+                        type="button"
+                        @click="submitReassign"
+                        :disabled="reassignForm.processing"
+                        class="px-5 py-2 text-xs font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 shadow-sm disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                        <span>✓</span>
+                        <span>{{ reassignForm.processing ? 'Atanıyor...' : 'Görevi Devret / Ata' }}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. ADMIN MODAL: ADIM DEĞİŞTİR / TAŞI (JUMP NODE) -->
+        <div
+            v-if="showJumpNodeModal"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            @click.self="showJumpNodeModal = false"
+        >
+            <div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+                <div class="px-6 py-5 border-b border-gray-100 bg-slate-900 text-white flex items-center justify-between">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-indigo-400 text-lg">🔀</span>
+                            <h3 class="text-base font-extrabold text-white">Süreci Farklı Bir Adıma Taşı (Jump Node)</h3>
+                        </div>
+                        <p class="text-xs text-slate-300 mt-0.5">
+                            Süreci akış üzerindeki herhangi bir adıma doğrudan ileri veya geri sarın.
+                        </p>
+                    </div>
+                    <button @click="showJumpNodeModal = false" class="text-slate-400 hover:text-white text-xl">&times;</button>
+                </div>
+
+                <div class="p-6 space-y-4">
+                    <!-- Hedef Düğüm -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">
+                            Hedef İş Akışı Adımı <strong class="text-red-500">*</strong>
+                        </label>
+                        <select
+                            v-model="jumpNodeForm.target_node_id"
+                            class="w-full rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                        >
+                            <option value="">Lütfen hedef adımı seçiniz...</option>
+                            <option
+                                v-for="node in workflowNodes"
+                                :key="node.id"
+                                :value="node.id"
+                            >
+                                {{ node.label }} [Adım ID: {{ node.id }}]
+                            </option>
+                        </select>
+                        <p v-if="jumpNodeForm.errors.target_node_id" class="text-xs text-red-600 mt-1">{{ jumpNodeForm.errors.target_node_id }}</p>
+                    </div>
+
+                    <!-- Gerekçe -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">
+                            Adım Değiştirme Gerekçesi <strong class="text-red-500">*</strong>
+                        </label>
+                        <textarea
+                            v-model="jumpNodeForm.reason"
+                            rows="3"
+                            class="w-full rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                            placeholder="Örn: Müşteri acil revize istediğinden süreç ilk onay adımına geri çekilmiştir."
+                        />
+                        <p v-if="jumpNodeForm.errors.reason" class="text-xs text-red-600 mt-1">{{ jumpNodeForm.errors.reason }}</p>
+                    </div>
+
+                    <div class="p-3 bg-rose-50 rounded-xl border border-rose-200 text-xs text-rose-900 flex items-start gap-2">
+                        <span class="text-base shrink-0">⚠️</span>
+                        <span>Mevcut bekleyen görevler iptal edilecek, seçilen hedef adımda yeni görevler oluşturulacaktır. Tüm hareketler denetim günlüğünde imzalanır.</span>
+                    </div>
+                </div>
+
+                <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
+                    <button
+                        type="button"
+                        @click="showJumpNodeModal = false"
+                        class="px-4 py-2 text-xs font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-100"
+                    >
+                        Vazgeç
+                    </button>
+                    <button
+                        type="button"
+                        @click="submitJumpNode"
+                        :disabled="jumpNodeForm.processing"
+                        class="px-5 py-2 text-xs font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 shadow-sm disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                        <span>✓</span>
+                        <span>{{ jumpNodeForm.processing ? 'Taşınıyor...' : 'Süreci Taşı ve Başlat' }}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. ADMIN MODAL: ZORLA İLERLET (FORCE PROGRESS) -->
+        <div
+            v-if="showForceProgressModal"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            @click.self="showForceProgressModal = false"
+        >
+            <div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+                <div class="px-6 py-5 border-b border-gray-100 bg-slate-900 text-white flex items-center justify-between">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-amber-400 text-lg">⏩</span>
+                            <h3 class="text-base font-extrabold text-white">Görevi Yönetici Yetkisiyle Zorla Tamamla</h3>
+                        </div>
+                        <p class="text-xs text-slate-300 mt-0.5">
+                            Tıkanmış veya bekleyen görevi yönetici onayı ile kapatıp akışı ilerletin.
+                        </p>
+                    </div>
+                    <button @click="showForceProgressModal = false" class="text-slate-400 hover:text-white text-xl">&times;</button>
+                </div>
+
+                <div class="p-6 space-y-4">
+                    <!-- Görev Seçimi -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">
+                            Tamamlanacak Görev <strong class="text-red-500">*</strong>
+                        </label>
+                        <select
+                            v-model="forceProgressForm.task_id"
+                            class="w-full rounded-xl border-gray-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 text-sm"
+                        >
+                            <option
+                                v-for="t in (instance.tasks || []).filter(task => task.status === 'pending')"
+                                :key="t.id"
+                                :value="t.id"
+                            >
+                                #{{ t.id }} - {{ t.title || t.node_label || 'Onay/Form Görevi' }} (Bekleyen: {{ t.assigned_user?.name || t.assigned_role || 'Atanmamış' }})
+                            </option>
+                        </select>
+                        <p v-if="forceProgressForm.errors.task_id" class="text-xs text-red-600 mt-1">{{ forceProgressForm.errors.task_id }}</p>
+                    </div>
+
+                    <!-- Gerekçe -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">
+                            Yönetici Müdahale Açıklaması <strong class="text-red-500">*</strong>
+                        </label>
+                        <textarea
+                            v-model="forceProgressForm.reason"
+                            rows="3"
+                            class="w-full rounded-xl border-gray-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 text-sm"
+                            placeholder="Örn: Fabrika müdürünün sözlü onayı doğrultusunda sistem yöneticisi tarafından onaylanmıştır."
+                        />
+                        <p v-if="forceProgressForm.errors.reason" class="text-xs text-red-600 mt-1">{{ forceProgressForm.errors.reason }}</p>
+                    </div>
+
+                    <div class="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                        <span class="text-base shrink-0">⚖️</span>
+                        <span>Bu işlem görev kaydını sizin adınıza 'completed' yapar ve yorum alanına yönetici onay şerhini düşer.</span>
+                    </div>
+                </div>
+
+                <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
+                    <button
+                        type="button"
+                        @click="showForceProgressModal = false"
+                        class="px-4 py-2 text-xs font-bold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-100"
+                    >
+                        Vazgeç
+                    </button>
+                    <button
+                        type="button"
+                        @click="submitForceProgress"
+                        :disabled="forceProgressForm.processing"
+                        class="px-5 py-2 text-xs font-black text-amber-950 bg-amber-400 hover:bg-amber-300 rounded-xl shadow-md disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                        <span>✓</span>
+                        <span>{{ forceProgressForm.processing ? 'İşleniyor...' : 'Zorla Onayla ve İlerlet' }}</span>
                     </button>
                 </div>
             </div>

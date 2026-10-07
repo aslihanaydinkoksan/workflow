@@ -45,6 +45,15 @@ class FollowUpController extends Controller
             }
         }
 
+        // Filtreleme: İş Akışı / Departman / Ürün Grubu
+        if ($workflowId = $request->input('workflow_id')) {
+            if ($workflowId !== 'all') {
+                $query->whereHas('processInstance', function ($sub) use ($workflowId) {
+                    $sub->where('workflow_id', $workflowId);
+                });
+            }
+        }
+
         // Arama (Müşteri adı, ürün, sipariş no)
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
@@ -73,10 +82,16 @@ class FollowUpController extends Controller
             ? round(($stats['converted'] / max(1, ($stats['converted'] + $stats['not_converted']))) * 100, 1) 
             : 0;
 
+        $availableWorkflows = \App\Models\Workflow::select('id', 'name')
+            ->where('status', 'published')
+            ->orderBy('name')
+            ->get();
+
         return Inertia::render('FollowUp/Index', [
-            'followUps' => $followUps,
-            'filters'   => $request->only(['status', 'search']),
-            'stats'     => $stats,
+            'followUps'          => $followUps,
+            'filters'            => $request->only(['status', 'search', 'workflow_id']),
+            'stats'              => $stats,
+            'availableWorkflows' => $availableWorkflows,
         ]);
     }
 

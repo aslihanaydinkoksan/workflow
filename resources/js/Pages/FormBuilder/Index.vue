@@ -98,7 +98,9 @@ const formatDate = (dateString) => {
                                     <tr v-for="(template, index) in templates" :key="template.id" class="hover:bg-gray-50">
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-medium">{{ index + 1 }}</td>
                                         <td class="px-6 py-4 whitespace-nowrap">
-                                            <div class="text-sm font-bold text-gray-900">{{ template.name }}</div>
+                                            <Link :href="route('form-templates.show', template.id)" class="text-sm font-bold text-gray-900 hover:text-indigo-600 transition-colors">
+                                                {{ template.name }}
+                                            </Link>
                                             <div class="text-xs text-gray-500 truncate w-48" :title="template.description">{{ template.description || 'Açıklama yok' }}</div>
                                         </td>
                                         <td class="px-6 py-4">
@@ -120,8 +122,9 @@ const formatDate = (dateString) => {
                                                 {{ template.is_active ? 'Aktif' : 'Pasif' }}
                                             </button>
                                         </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                            <Link :href="route('form-templates.edit', template.id)" class="text-indigo-600 hover:text-indigo-900 mr-4">Tasarla / Düzenle</Link>
+                                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
+                                            <Link :href="route('form-templates.show', template.id)" class="text-emerald-600 hover:text-emerald-900">Görüntüle</Link>
+                                            <Link :href="route('form-templates.edit', template.id)" class="text-indigo-600 hover:text-indigo-900">Tasarla / Düzenle</Link>
                                             <button @click="deleteTemplate(template.id)" class="text-red-600 hover:text-red-900">Sil</button>
                                         </td>
                                     </tr>

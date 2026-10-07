@@ -65,6 +65,21 @@ class TaskController extends Controller
             ->with(['processInstance.workflow', 'processInstance.starter'])
             ->get();
 
+        $activeWorkflows = \App\Models\Workflow::where('status', 'active')
+            ->select('id', 'name', 'category')
+            ->orderBy('name')
+            ->get();
+
+        $allCategories = [];
+        foreach ($activeWorkflows as $wf) {
+            $cats = is_array($wf->category) ? $wf->category : [$wf->category];
+            foreach ($cats as $c) {
+                if (!empty($c) && !in_array($c, $allCategories, true)) {
+                    $allCategories[] = $c;
+                }
+            }
+        }
+
         return Inertia::render('Tasks/Index', [
             'tasks'                => $tasks,
             'completedTasks'       => $completedTasks,
@@ -72,6 +87,8 @@ class TaskController extends Controller
             'given_delegations'    => $givenDelegations, // Yeni Prop
             'received_delegations' => $receivedDelegations, // Yeni Prop
             'pending_follow_ups'   => $pendingFollowUps,
+            'active_workflows'     => $activeWorkflows,
+            'workflow_categories'  => $allCategories,
         ]);
     }
 
@@ -99,13 +116,22 @@ class TaskController extends Controller
         /** @var FormTemplate|null $subForm */
         $subForm = $subFormId ? FormTemplate::find($subFormId) : null;
 
+        $isStartNode = in_array((string) $task->node_id, ['1', 'node_start'], true)
+            || in_array($workflowNode['type'] ?? '', ['start', 'input'], true);
+
+        // Eğer başlangıç formu revize ediliyorsa ve özel bir alt form tanımlanmamışsa, ana başlangıç formunu yükle
+        if (! $subForm && ($isStartNode || $task->is_revision)) {
+            $subForm = $task->processInstance->workflow->formTemplate;
+        }
+
         $previousForms = $this->getPreviousFormsForTask($task);
         $instanceData = (array) ($task->processInstance->data ?? []);
 
         /** @var FormTemplate|null $workflowStartForm */
         $workflowStartForm = $task->processInstance->workflow->formTemplate;
 
-        if ($workflowStartForm && ! empty($instanceData)) {
+        // Kullanıcı şu an başlangıç formunu düzenliyorsa/revize ediyorsa, aynı formu yukarıda pasif salt-okunur olarak çift gösterme
+        if (! $task->is_revision && $workflowStartForm && ! empty($instanceData)) {
             $startFormEntry = $this->buildFormEntryFromData(
                 $workflowStartForm,
                 $instanceData,
@@ -123,6 +149,7 @@ class TaskController extends Controller
             $prefilledFormData = $this->extractFormDataForTemplate($instanceData, $subForm);
         }
 
+
         $previousTaskNotes = $this->getPreviousTaskNotesForTask($task);
 
         return Inertia::render('Tasks/Show', [
@@ -133,6 +160,7 @@ class TaskController extends Controller
             'previousForms' => $previousForms,
             'previousTaskNotes' => $previousTaskNotes,
             'prefilledFormData' => $prefilledFormData,
+            'fieldAudits' => app(\App\Services\ProcessAuditService::class)->getAuditsForInstance($task->processInstance),
             'appLogo' => \App\Models\Setting::where('key', 'app_logo')->value('value'),
         ]);
     }
@@ -147,15 +175,47 @@ class TaskController extends Controller
             abort(403);
         }
 
+        if ($task->status !== 'pending') {
+            return redirect()->route('processes.tracker', $task->process_instance_id)
+                ->with('info', 'Bu görev başka bir yetkili tarafından zaten tamamlanmış veya işleme kapatılmıştır.');
+        }
+
         $action = $request->input('task_action', $request->input('action'));
         $comment = $request->input('comment');
         $formData = $request->input('answers', $request->input('data'));
 
+        // Karar ve form verisi senkronizasyonu
+        if (is_array($formData)) {
+            if ($action === 'reject') {
+                $formData['isletme_karari'] = 'Reddedildi';
+            } elseif ($action === 'revise') {
+                $formData['isletme_karari'] = 'Revizyon İstendi';
+            } elseif ($task->type === 'approval' && $action === 'approve') {
+                if (($formData['isletme_karari'] ?? '') === 'Reddedildi' || empty($formData['isletme_karari'])) {
+                    $formData['isletme_karari'] = 'Kabul Edildi';
+                }
+            } elseif ($task->is_revision && $action === 'approve') {
+                $formData['isletme_karari'] = 'Revize Edildi (İnceleniyor)';
+            }
+        }
+
         // Sub-form verisi geldiyse ProcessInstance içine kaydet
         if (is_array($formData) && ($task->type === 'form' || ! empty($formData))) {
             $instance = $task->processInstance;
-            $mergedData = array_merge((array) $instance->data, $formData);
+            $oldData = (array) ($instance->data ?? []);
+            $mergedData = array_merge($oldData, $formData);
             $instance->update(['data' => $mergedData]);
+
+            // Denetim İzi (Audit Diff): Değişen veya yeni eklenen alanları logla
+            app(\App\Services\ProcessAuditService::class)->recordDiff(
+                $instance,
+                $oldData,
+                $formData,
+                Auth::id(),
+                $task->is_revision ? 'revision' : 'form_submit',
+                $task->id,
+                $comment
+            );
 
             FormSubmission::updateOrCreate(
                 [
@@ -169,8 +229,15 @@ class TaskController extends Controller
             );
         }
 
-        // KOŞULLU DOĞRULAMA (İş Akışı Elemanları Onay Düğümü Doğrulaması)
-        if ($action !== 'reject') {
+        // KOŞULLU DOĞRULAMA (Sadece Onaylama İşleminde Kontrol Edilir)
+        if (!in_array($action, ['reject', 'revise'], true)) {
+            // 0. GÖREVLER AYRILIĞI & 4-GÖZ İLKESİ (Separation of Duties - SoD) KORUMASI:
+            // Talep sahibi kendi onay görevini onaylayamaz!
+            $isAdminUser = Auth::user()->hasRole('Admin') || Auth::user()->hasRole('superadmin');
+            if ($task->type === 'approval' && (int)$task->processInstance->started_by === Auth::id() && !$isAdminUser) {
+                return back()->with('error', 'Görevler Ayrılığı (4-Göz İlkesi / Separation of Duties) gereğince kendi başlattığınız talebi onaylayamazsınız. Onay bir üst amirinize aittir.');
+            }
+
             $workflowNode = collect($task->processInstance->workflow->nodes ?? [])->firstWhere('id', $task->node_id);
             $allData = array_merge((array) $task->processInstance->data, (array) ($formData ?? []));
 
@@ -206,8 +273,21 @@ class TaskController extends Controller
             }
         }
 
+        // Ret ve Revizyon İşlemlerinde Açıklama / Gerekçe Mecburidir
+        if (in_array($action, ['reject', 'revise'], true)) {
+            $reason = trim((string) ($comment ?: ''));
+            if ($reason === '') {
+                $actionName = $action === 'reject' ? 'Ret' : 'Revizyon';
+                return back()->with('error', "{$actionName} işlemini gerçekleştirebilmek için lütfen bir gerekçe / açıklama belirtiniz.");
+            }
+            $comment = $reason;
+            if (is_array($formData)) {
+                $formData['isletme_notu'] = $reason;
+            }
+        }
+
         if ($action === 'reject') {
-            $manager->rejectTask($task, $comment);
+            $manager->rejectTask($task, $comment, $user->id);
             $manager->cancelPendingTasksForNode($task->processInstance, $task->node_id, $task->id);
             app(NotificationService::class)->taskRejected(
                 $task->processInstance,
@@ -218,16 +298,32 @@ class TaskController extends Controller
             $edgeAction = 'rejected';
             $shouldAdvance = true;
         } elseif ($action === 'revise') {
-            $manager->completeTask($task, $comment);
+            $manager->reviseTask($task, $comment, $user->id);
             $manager->cancelPendingTasksForNode($task->processInstance, $task->node_id, $task->id);
             $edgeAction = 'revised';
             $shouldAdvance = true;
         } else {
-            $manager->completeTask($task, $comment);
+            $manager->completeTask($task, $comment, $user->id);
             $edgeAction = 'approved';
-            // Aynı adımda roldeki herhangi biri onaylayınca sıradaki adıma geç
-            $manager->cancelPendingTasksForNode($task->processInstance, $task->node_id, $task->id);
-            $shouldAdvance = true;
+
+            $workflowNode = collect($task->processInstance->workflow->nodes ?? [])->firstWhere('id', $task->node_id);
+            $approvalPolicy = $workflowNode['data']['approvalPolicy'] ?? 'any';
+
+            if ($approvalPolicy === 'all') {
+                // Konsensüs / Tümünün Onayı Şart:
+                // Bu adımda hala bekleyen (pending) başka bir görev var mı?
+                $hasPending = $manager->nodeHasPendingTasks($task->processInstance, $task->node_id);
+                if ($hasPending) {
+                    $shouldAdvance = false;
+                } else {
+                    $shouldAdvance = true;
+                }
+            } else {
+                // İlk Onaylayan Yeterli (any / varsayılan):
+                // Diğer bekleyen eş görevleri iptal et ve sıradaki adıma geç
+                $manager->cancelPendingTasksForNode($task->processInstance, $task->node_id, $task->id);
+                $shouldAdvance = true;
+            }
         }
 
         if ($shouldAdvance) {
@@ -236,7 +332,7 @@ class TaskController extends Controller
                 'current_node_id' => $task->node_id,
                 'status' => 'running',
             ]);
-            $engine->onTaskCompleted($instance, $edgeAction);
+            $engine->onTaskCompleted($instance, $edgeAction, $comment, $task->node_id);
             $instance = $instance->fresh();
             if ($instance->status === 'completed') {
                 $starter = $instance->starter; // Süreci başlatan kullanıcı
@@ -277,12 +373,17 @@ class TaskController extends Controller
                     }
                 }
             }
-            $message = $action === 'reject'
-                ? 'Görev reddedildi. Süreç, tasarımdaki Red bağlantısına göre yönlendirildi.'
-                : 'Görev başarıyla tamamlandı. Süreç otomatik olarak sıradaki adıma geçti.';
+            $message = match ($action) {
+                'reject' => 'Görev reddedildi. Süreç, tasarımdaki Red bağlantısına göre yönlendirildi.',
+                'revise' => 'Revizyon talebiniz iletildi. Süreç, tasarımdaki Revize / Geri Dön bağlantısına göre yönlendirildi.',
+                default  => $task->is_revision
+                    ? 'Talebiniz başarıyla revize edildi ve onay makamına yeniden iletildi.'
+                    : 'Görev başarıyla onaylandı. Süreç otomatik olarak sıradaki adıma geçti.',
+            };
         } else {
             $task->processInstance->update(['status' => 'waiting']);
-            $message = 'Göreviniz kaydedildi.';
+            $actionLabel = $task->type === 'form' ? 'Form yanıtınız' : 'Onayınız';
+            $message = "{$actionLabel} başarıyla kaydedildi. Çoklu onay (konsensüs) kuralı gereği diğer yetkili(ler)in işlemi bekleniyor.";
         }
 
         return redirect()->route('processes.tracker', $task->process_instance_id)->with('success', $message);
@@ -571,6 +672,12 @@ class TaskController extends Controller
         $instanceData = (array) ($task->processInstance->data ?? []);
         $formData = $this->extractFormDataForTemplate($instanceData, $subForm);
 
+        $elements = $subForm->schema ?? [];
+        $formattedFormData = [];
+        foreach ($elements as $el) {
+            $formattedFormData[$el['id']] = $this->formatFieldValueForExport($formData[$el['id']] ?? null);
+        }
+
         $pdf = Pdf::loadView('pdf.task-detail', [
             'templateName' => $subForm->name,
             'description'  => $subForm->description,
@@ -578,8 +685,8 @@ class TaskController extends Controller
             'publishDate'  => $subForm->publish_date,
             'revisionNo'   => $subForm->revision_no,
             'revisionDate' => $subForm->revision_date,
-            'elements'     => $subForm->schema ?? [],
-            'formData'     => $formData,
+            'elements'     => $elements,
+            'formData'     => $formattedFormData,
         ]);
 
         $fileName = Str::slug($subForm->name) . '-' . $task->id . '.pdf';
@@ -616,11 +723,7 @@ class TaskController extends Controller
         foreach ($elements as $el) {
             if ($el['type'] === 'header') continue;
 
-            $val = $formData[$el['id']] ?? '';
-            if (is_array($val)) $val = implode(', ', $val);
-            elseif (is_bool($val)) $val = $val ? 'Evet' : 'Hayır';
-
-            $excelData[$el['label']] = empty($val) ? '-' : $val;
+            $excelData[$el['label']] = $this->formatFieldValueForExport($formData[$el['id']] ?? null);
         }
 
         $fileName = Str::slug($subForm->name) . '-' . $task->id . '.xlsx';
@@ -646,5 +749,60 @@ class TaskController extends Controller
         $fileName = 'Analiz-Sertifikasi-PI-' . $task->process_instance_id . '.pdf';
 
         return $pdf->download($fileName);
+    }
+
+    private function formatFieldValueForExport($val): string
+    {
+        if (is_null($val) || $val === '') {
+            return '-';
+        }
+
+        if (is_bool($val)) {
+            return $val ? 'Evet' : 'Hayır';
+        }
+
+        if (is_array($val)) {
+            if (isset($val['start']) || isset($val['end'])) {
+                $start = !empty($val['start']) ? \Carbon\Carbon::parse($val['start'])->format('d.m.Y') : '';
+                $end = !empty($val['end']) ? \Carbon\Carbon::parse($val['end'])->format('d.m.Y') : '';
+                $text = trim($start . ' - ' . $end, ' -');
+                if (!empty($val['note'])) {
+                    $text .= ' (Not: ' . $val['note'] . ')';
+                }
+                return empty($text) ? '-' : $text;
+            }
+
+            if (isset($val['date'])) {
+                $date = !empty($val['date']) ? \Carbon\Carbon::parse($val['date'])->format('d.m.Y') : '';
+                if (!empty($val['note'])) {
+                    $date .= ' (Not: ' . $val['note'] . ')';
+                }
+                return empty($date) ? '-' : $date;
+            }
+
+            $items = [];
+            foreach ($val as $sub) {
+                if (is_array($sub)) {
+                    if (isset($sub['start']) || isset($sub['end'])) {
+                        $start = !empty($sub['start']) ? \Carbon\Carbon::parse($sub['start'])->format('d.m.Y') : '';
+                        $end = !empty($sub['end']) ? \Carbon\Carbon::parse($sub['end'])->format('d.m.Y') : '';
+                        $itemText = trim($start . ' - ' . $end, ' -');
+                        if (!empty($sub['note'])) $itemText .= ' (Not: ' . $sub['note'] . ')';
+                        $items[] = $itemText;
+                    } elseif (isset($sub['date'])) {
+                        $itemText = !empty($sub['date']) ? \Carbon\Carbon::parse($sub['date'])->format('d.m.Y') : '';
+                        if (!empty($sub['note'])) $itemText .= ' (Not: ' . $sub['note'] . ')';
+                        $items[] = $itemText;
+                    } else {
+                        $items[] = json_encode($sub, JSON_UNESCAPED_UNICODE);
+                    }
+                } else {
+                    $items[] = (string)$sub;
+                }
+            }
+            return empty($items) ? '-' : implode('; ', $items);
+        }
+
+        return (string)$val;
     }
 }

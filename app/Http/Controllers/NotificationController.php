@@ -10,8 +10,16 @@ class NotificationController extends Controller
 {
     public function index(Request $request)
     {
+        $user = $request->user();
+
+        // Bildirim merkezine girildiğinde okunmamış bildirimleri otomatik okundu işaretle
+        UserNotification::query()
+            ->where('user_id', $user->id)
+            ->whereNull('read_at')
+            ->update(['read_at' => now()]);
+
         $notifications = UserNotification::query()
-            ->where('user_id', $request->user()->id)
+            ->where('user_id', $user->id)
             ->latest()
             ->paginate(20)
             ->withQueryString();
@@ -29,6 +37,10 @@ class NotificationController extends Controller
 
         $notification->markAsRead();
 
+        if ($request->wantsJson()) {
+            return response()->json(['success' => true]);
+        }
+
         return back();
     }
 
@@ -38,6 +50,10 @@ class NotificationController extends Controller
             ->where('user_id', $request->user()->id)
             ->whereNull('read_at')
             ->update(['read_at' => now()]);
+
+        if ($request->wantsJson()) {
+            return response()->json(['success' => true]);
+        }
 
         return back()->with('success', 'Tüm bildirimler okundu olarak işaretlendi.');
     }

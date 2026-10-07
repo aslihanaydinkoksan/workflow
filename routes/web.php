@@ -58,9 +58,16 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::resource('form-templates', \App\Http\Controllers\FormTemplateController::class);
     });
 
-    // Süreç Akış Tasarımı (Sadece 'manage_workflows' yetkisi olanlar)
+    // Süreç Akış Kataloğu & Tasarımı
+    Route::get('/workflows', [\App\Http\Controllers\WorkflowController::class, 'index'])->name('workflows.index');
     Route::middleware('can:manage_workflows')->group(function () {
-        Route::resource('workflows', App\Http\Controllers\WorkflowController::class);
+        Route::post('/workflows/{workflow}/toggle-status', [\App\Http\Controllers\WorkflowController::class, 'toggleStatus'])->name('workflows.toggle-status');
+        Route::post('/workflows/{workflow}/duplicate', [\App\Http\Controllers\WorkflowController::class, 'duplicate'])->name('workflows.duplicate');
+        Route::post('/workflows/{workflow}/publish-version', [\App\Http\Controllers\WorkflowController::class, 'publishVersion'])->name('workflows.publish-version');
+        Route::get('/workflows/{workflow}/versions', [\App\Http\Controllers\WorkflowController::class, 'versions'])->name('workflows.versions');
+        Route::get('/workflows/{workflow}/migration-schema', [\App\Http\Controllers\WorkflowController::class, 'migrationSchema'])->name('workflows.migration-schema');
+        Route::post('/workflows/{workflow}/migrate-instances', [\App\Http\Controllers\WorkflowController::class, 'migrateInstances'])->name('workflows.migrate-instances');
+        Route::resource('workflows', \App\Http\Controllers\WorkflowController::class)->except(['index']);
     });
 
     // Süreç Başlatma (Sadece 'start_processes' yetkisi olanlar)
@@ -71,16 +78,20 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/processes/{workflow}', [\App\Http\Controllers\ProcessController::class, 'store'])->name('processes.store');
     });
 
-    // Süreç İzleme, Geçmiş ve Sertifika (Yetki kontrolleri ilgili Controller metodlarında yapılır)
+    // Süreç İzleme, Geçmiş, Düzenleme ve İptal (Yetki denetimleri Controller içinde dinamik yapılır)
     Route::get('/processes/history', [\App\Http\Controllers\ProcessController::class, 'history'])->name('processes.history');
     Route::get('/processes/department', [\App\Http\Controllers\ProcessController::class, 'department'])->name('processes.department')->middleware('can:processes.view_department');
     Route::get('/processes/{instance}/tracker', [\App\Http\Controllers\ProcessController::class, 'tracker'])->name('processes.tracker');
+    Route::get('/processes/{instance}/edit', [\App\Http\Controllers\ProcessController::class, 'edit'])->name('processes.edit');
+    Route::put('/processes/{instance}', [\App\Http\Controllers\ProcessController::class, 'update'])->name('processes.update');
+    Route::post('/processes/{instance}/cancel', [\App\Http\Controllers\ProcessController::class, 'cancel'])->name('processes.cancel');
+    Route::post('/processes/{instance}/reschedule-termin', [\App\Http\Controllers\ProcessController::class, 'rescheduleTermin'])->name('processes.reschedule-termin');
     Route::get('/processes/{instance}/certificate', [\App\Http\Controllers\ProcessController::class, 'exportCertificate'])->name('processes.certificate');
     Route::get('/processes/{instance}/travel-order', [\App\Http\Controllers\ProcessController::class, 'exportTravelOrder'])->name('processes.travel-order');
-
-    Route::middleware('can:processes.cancel')->group(function () {
-        Route::post('/processes/{instance}/cancel', [\App\Http\Controllers\ProcessController::class, 'cancel'])->name('processes.cancel');
-    });
+    // Yönetici Süreç Müdahale Kokpiti (Fortune-500 Admin Intervention)
+    Route::post('/processes/{instance}/admin/reassign', [\App\Http\Controllers\ProcessController::class, 'adminReassignTask'])->name('processes.admin.reassign');
+    Route::post('/processes/{instance}/admin/jump-node', [\App\Http\Controllers\ProcessController::class, 'adminJumpNode'])->name('processes.admin.jump-node');
+    Route::post('/processes/{instance}/admin/force-progress', [\App\Http\Controllers\ProcessController::class, 'adminForceProgress'])->name('processes.admin.force-progress');
 
     // Zamanlanmış Takip ve Anket Rotaları (Generic BPM Follow-up)
     Route::get('/follow-ups', [\App\Http\Controllers\FollowUpController::class, 'index'])->name('follow-ups.index');
@@ -170,5 +181,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         });
     });
 });
+
+// Yerel Geliştirme & Test Ortamı İçin Hızlı Kullanıcı Değiştirici (Impersonate)
+if (app()->environment('local')) {
+    Route::match(['get', 'post'], '/dev/switch-user/{id}', [\App\Http\Controllers\DevImpersonateController::class, 'switchUser'])->name('dev.switch-user');
+    Route::match(['get', 'post'], '/dev/impersonate/{id}', [\App\Http\Controllers\DevImpersonateController::class, 'switchUser']);
+}
 
 // auth.php local auth için yukarıda condition ile dahil ediliyor

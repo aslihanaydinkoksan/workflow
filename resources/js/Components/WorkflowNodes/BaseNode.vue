@@ -12,20 +12,42 @@ const props = defineProps({
 
 const emit = defineEmits(['openSettings', 'duplicate', 'remove']);
 
-// forms listesini inject ile alıyoruz (Designer'dan provide edilecek)
+// forms, departmanlar ve kullanıcılar listesini inject ile alıyoruz (Designer'dan provide edilir)
 const formsList = inject('formsList', ref([]));
+const departmentsList = inject('departmentsList', ref([]));
+const usersList = inject('usersList', ref([]));
 
 const getSubtitleInfo = (data) => {
     if (data.taskType === 'start') return { icon: '▶', text: 'Süreci Başlatır' };
     if (data.taskType === 'end') return { icon: '■', text: data.processStatus === 'rejected' ? 'Reddedildi / İptal' : 'Başarıyla Tamamlar' };
     
     if (data.taskType === 'form') {
-        // Form görevi: bağlı form adını göster
+        let text = 'Form Seçilmedi';
         if (data.subFormId) {
             const foundForm = formsList.value?.find(f => f.id == data.subFormId);
-            return { icon: '📋', text: foundForm ? foundForm.name : 'Form Seçili' };
+            text = foundForm ? foundForm.name : 'Form Görevi';
         }
-        return { icon: '📋', text: 'Form Seçilmedi' };
+        if (data.assignType === 'department' && data.assignValue) {
+            const foundDept = departmentsList.value?.find(d => d.id == data.assignValue);
+            let who = foundDept ? foundDept.name : 'Departman';
+            if (data.deptManagerType === 'assistant_manager') who += ' (Müdür Yrd.)';
+            else if (data.deptManagerType === 'chief') who += ' (Şef)';
+            else if (data.deptManagerType === 'all_managers') who += ' (Tüm Müdürler)';
+            else if (data.deptManagerType === 'all_chiefs') who += ' (Tüm Şefler)';
+            else if (data.deptManagerType === 'specific_users' && Array.isArray(data.assignedUserIds) && data.assignedUserIds.length > 0) {
+                who += ` (${data.assignedUserIds.length} Yetkili)`;
+            } else if (data.deptManagerType === 'specific_user' && data.assignedUserId) {
+                const foundUser = usersList.value?.find(u => u.id == data.assignedUserId);
+                if (foundUser) who += ` (${foundUser.name})`;
+            }
+            text += ` · 🏢 ${who}`;
+        } else if (data.assignType === 'user') {
+            const count = Array.isArray(data.assignedUserIds) && data.assignedUserIds.length > 0
+                ? data.assignedUserIds.length
+                : (data.assignValue ? 1 : 0);
+            text += ` · 👤 ${count > 1 ? count + ' Kullanıcı' : 'Kullanıcı'}`;
+        }
+        return { icon: '📋', text };
     }
 
     if (data.taskType === 'follow_up') {
@@ -61,12 +83,33 @@ const getSubtitleInfo = (data) => {
             text = data.assignValue === 'manager_1' ? '1. Amir' : '2. Amir';
         } else if (data.assignType === 'department') {
             icon = '🏢';
-            text = 'Departman Yöneticisi';
+            let deptName = 'Departman';
+            if (data.assignValue) {
+                const foundDept = departmentsList.value?.find(d => d.id == data.assignValue);
+                if (foundDept) deptName = foundDept.name;
+            }
+            let tierName = 'Müdür';
+            if (data.deptManagerType === 'assistant_manager') tierName = 'Müdür Yrd.';
+            else if (data.deptManagerType === 'chief') tierName = 'İşletme Şefi';
+            else if (data.deptManagerType === 'all_managers') tierName = 'Tüm Müdürler';
+            else if (data.deptManagerType === 'all_chiefs') tierName = 'Tüm Şefler';
+            else if (data.deptManagerType === 'specific_users') {
+                const count = Array.isArray(data.assignedUserIds) ? data.assignedUserIds.length : 0;
+                tierName = count > 0 ? `${count} Yetkili` : 'Çoklu Yetkili';
+            } else if (data.deptManagerType === 'specific_user' && data.assignedUserId) {
+                const foundUser = usersList.value?.find(u => u.id == data.assignedUserId);
+                tierName = foundUser ? foundUser.name : 'Yetkili';
+            }
+            text = `${deptName} · ${tierName}`;
         } else if (data.assignType === 'directorate') {
             icon = '🏛';
             text = 'Direktörlük Yöneticisi';
         } else if (data.assignType === 'user') {
-            text = 'Belirli Kullanıcı';
+            icon = '👥';
+            const count = Array.isArray(data.assignedUserIds) && data.assignedUserIds.length > 0
+                ? data.assignedUserIds.length
+                : (data.assignValue ? 1 : 0);
+            text = count > 1 ? `${count} Kullanıcı` : 'Belirli Kullanıcı';
         } else if (data.assignType === 'role') {
             icon = '🔑';
             text = 'Belirli Rol';
@@ -76,8 +119,23 @@ const getSubtitleInfo = (data) => {
             text = 'Atanmış';
         }
 
+        if (data.approvalPolicy === 'all') {
+            text += ' · 🤝 Konsensüs';
+        } else if (data.approvalPolicy === 'any' && (data.deptManagerType?.startsWith('all_') || (Array.isArray(data.assignedUserIds) && data.assignedUserIds.length > 1))) {
+            text += ' · ⚡ İlk Onay';
+        }
+
+        if (data.subFormId) {
+            const foundForm = formsList.value?.find(f => f.id == data.subFormId);
+            if (foundForm) text += ` · 📋 ${foundForm.name}`;
+        }
+
         if (data.rejectEnabled) {
             text += ' · ↩ Red';
+        }
+
+        if (data.requireTermin) {
+            text += ' · 📅 Termin Zorunlu';
         }
 
         if (data.requireFieldOnApprove) {
@@ -87,6 +145,14 @@ const getSubtitleInfo = (data) => {
         return { icon, text };
     }
     
+    if (data.taskType === 'parallel_fork') {
+        return { icon: '🔀', text: 'Paralel Dallanma (AND-Fork Gateway)' };
+    }
+
+    if (data.taskType === 'parallel_join') {
+        return { icon: '🔗', text: 'Paralel Birleşme (AND-Join Barrier)' };
+    }
+
     if (data.taskType === 'notify') {
         return { icon: '✉', text: data.notifyEmail || (data.notifyTo === 'initiator' ? 'Başlatan Kişiye' : 'E-posta Bildirimi') };
     }
@@ -99,10 +165,20 @@ const getSubtitleInfo = (data) => {
         return { icon: '⚙', text: 'Otomatik Kural Kararı' };
     }
     
-    return { icon: 'ℹ', text: 'Yapılandırılmamış' };
+    let res = { icon: 'ℹ', text: 'Yapılandırılmamış' };
+    if (data.boundaryTimer?.enabled) {
+        res.text += ` · ⏱️ ${data.boundaryTimer.duration_hours || 24}s Timer`;
+    }
+    return res;
 };
 
-const subtitle = computed(() => getSubtitleInfo(props.data));
+const subtitle = computed(() => {
+    const info = getSubtitleInfo(props.data);
+    if (props.data?.boundaryTimer?.enabled && !info.text.includes('Timer')) {
+        info.text += ` · ⏱️ ${props.data.boundaryTimer.duration_hours || 24}s Timer`;
+    }
+    return info;
+});
 </script>
 
 <template>

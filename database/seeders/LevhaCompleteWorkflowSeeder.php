@@ -139,17 +139,90 @@ class LevhaCompleteWorkflowSeeder extends Seeder
             echo "   + 'Levha Ekstrüzyon Hattı 1' makine dugumu baglandi.\n";
         }
 
-        // D) Levha Isletme Yoneticisi Dugumu (Onayci)
-        $mudurUser = User::where('email', 'mudur@test.com')->first();
+        // D) LEVHA Departmanı Kadro ve Yönetici Tanımları (department_id = 23)
+        $levhaDept = Department::where('name', 'LEVHA')->orWhere('id', 23)->first();
+        $levhaDeptId = $levhaDept?->id ?? 23;
+
+        $aykut = User::updateOrCreate(
+            ['email' => 'aykut.celik@koksan.com'],
+            [
+                'name' => 'Aykut ÇELİK',
+                'first_name' => 'Aykut',
+                'last_name' => 'ÇELİK',
+                'title' => 'Levha Üretim Müdürü',
+                'department_id' => $levhaDeptId,
+                'password' => \Illuminate\Support\Facades\Hash::make('password'),
+                'is_active' => true,
+                'is_mavi_yaka' => false,
+            ]
+        );
+        $aykut->syncRoles(['Müdür']);
+
+        $hakan = User::updateOrCreate(
+            ['email' => 'hakan.demir@koksan.com'],
+            [
+                'name' => 'Hakan DEMİR',
+                'first_name' => 'Hakan',
+                'last_name' => 'DEMİR',
+                'title' => 'Levha Üretim Müdür Yardımcısı',
+                'department_id' => $levhaDeptId,
+                'password' => \Illuminate\Support\Facades\Hash::make('password'),
+                'is_active' => true,
+                'is_mavi_yaka' => false,
+            ]
+        );
+        $hakan->syncRoles(['Müdür']);
+
+        $serkan = User::updateOrCreate(
+            ['email' => 'serkan.telek@koksan.com'],
+            [
+                'name' => 'Serkan TELEK',
+                'first_name' => 'Serkan',
+                'last_name' => 'TELEK',
+                'title' => 'Levha İşletme Şefi',
+                'department_id' => $levhaDeptId,
+                'password' => \Illuminate\Support\Facades\Hash::make('password'),
+                'is_active' => true,
+                'is_mavi_yaka' => false,
+            ]
+        );
+        $serkan->syncRoles(['Amir']);
+
+        $mustafa = User::updateOrCreate(
+            ['email' => 'mustafa.yilmaz@koksan.com'],
+            [
+                'name' => 'Mustafa YILMAZ',
+                'first_name' => 'Mustafa',
+                'last_name' => 'YILMAZ',
+                'title' => 'Levha Kalite ve Laboratuvar Sorumlusu',
+                'department_id' => $levhaDeptId,
+                'password' => \Illuminate\Support\Facades\Hash::make('password'),
+                'is_active' => true,
+                'is_mavi_yaka' => false,
+            ]
+        );
+        $mustafa->syncRoles(['Amir']);
+
+        // department_managers kayıtları
+        DB::table('department_managers')->where('department_id', $levhaDeptId)->delete();
+        DB::table('department_managers')->insert([
+            ['department_id' => $levhaDeptId, 'user_id' => $aykut->id, 'type' => 'manager', 'created_at' => now(), 'updated_at' => now()],
+            ['department_id' => $levhaDeptId, 'user_id' => $hakan->id, 'type' => 'assistant_manager', 'created_at' => now(), 'updated_at' => now()],
+            ['department_id' => $levhaDeptId, 'user_id' => $serkan->id, 'type' => 'chief', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        echo "   + Levha Departman Yöneticileri (Müdür, Müdür Yrd, Şef) bağlandı.\n";
+
+        // E) Levha Isletme Yoneticisi Dugumu (Onayci)
+        $mudurUser = $aykut;
         $levhaMudurNode = Node::where('label', 'Levha İşletme Sorumlusu')->first();
         if (!$levhaMudurNode) {
             $levhaMudurNode = $hierarchyService->createNode([
                 'tree_type_id' => $personelTreeType->id,
                 'label'        => 'Levha İşletme Sorumlusu',
                 'node_subtype' => 'Yönetici',
-                'user_id'      => $mudurUser?->id,
+                'user_id'      => $mudurUser->id,
                 'metadata'     => [
-                    'personel_adi'     => $mudurUser?->name ?? 'Levha İşletme Müdürü',
+                    'personel_adi'     => $mudurUser->name,
                     'departman_gorevi' => 'Numune Kabul ve Termin Yetkilisi',
                 ],
                 'is_active'    => true,
@@ -157,17 +230,17 @@ class LevhaCompleteWorkflowSeeder extends Seeder
             echo "   + 'Levha İşletme Sorumlusu' personel dugumu baglandi.\n";
         }
 
-        // E) Levha Kalite Kontrol Uzmani Dugumu (Analiz Girisi)
-        $kaliteUser = User::where('email', 'ayse@koksan.com')->first();
+        // F) Levha Kalite Kontrol Uzmani Dugumu (Analiz Girisi)
+        $kaliteUser = $mustafa;
         $levhaKaliteNode = Node::where('label', 'Levha Kalite Uzmanı')->first();
         if (!$levhaKaliteNode) {
             $levhaKaliteNode = $hierarchyService->createNode([
                 'tree_type_id' => $personelTreeType->id,
                 'label'        => 'Levha Kalite Uzmanı',
                 'node_subtype' => 'Kalite',
-                'user_id'      => $kaliteUser?->id,
+                'user_id'      => $kaliteUser->id,
                 'metadata'     => [
-                    'personel_adi'     => $kaliteUser?->name ?? 'Levha Kalite Uzmanı',
+                    'personel_adi'     => $kaliteUser->name,
                     'departman_gorevi' => 'Kalite Analiz ve Laboratuvar Testleri',
                 ],
                 'is_active'    => true,
@@ -515,7 +588,7 @@ class LevhaCompleteWorkflowSeeder extends Seeder
             // 2. Isletme Kabul / Ret & Termin Onayi
             [
                 'id' => 'node_isletme_onay',
-                'type' => 'approval',
+                'type' => 'decision',
                 'position' => ['x' => 300, 'y' => 150],
                 'data' => [
                     'label' => 'LEVHA İşletme Kabul ve Termin Onayı',
@@ -541,6 +614,7 @@ class LevhaCompleteWorkflowSeeder extends Seeder
                     'taskType' => 'form',
                     'assignType' => 'department',
                     'assignValue' => 23, // LEVHA
+                    'deptManagerType' => 'chief', // Mustafa Yılmaz (Amir / Kalite & Lab Sorumlusu)
                     'subFormId' => $formTemplate->id,
                     'color' => '#10b981',
                     'description' => 'Numune üretildikten sonra gerçekleşen analiz sonuçları ve Lot no sisteme girilir.'
@@ -645,6 +719,13 @@ class LevhaCompleteWorkflowSeeder extends Seeder
                 'source' => 'node_isletme_onay',
                 'target' => 'node_ret_bildirim',
                 'sourceHandle' => 'rejected',
+            ],
+            [
+                'id' => 'edge_isletme_revised',
+                'source' => 'node_isletme_onay',
+                'target' => 'node_start',
+                'sourceHandle' => 'revised',
+                'data' => ['condition' => 'revised'],
             ],
             [
                 'id' => 'edge_ret_to_end',

@@ -15,6 +15,7 @@ use App\Models\WorkflowCategory;
 use App\Services\WorkflowGraphNormalizer;
 use App\Services\WorkflowRepairService;
 use App\Services\ProcessEngine;
+use App\Services\WorkflowMigrationService;
 use Spatie\Permission\Models\Role;
 
 class WorkflowController extends Controller
@@ -32,41 +33,56 @@ class WorkflowController extends Controller
             || $user->hasRole('superadmin')
             || $user->can('view_admin_panel');
 
-        $workflows = Workflow::with([
-            'formTemplate',
-            'latestProcessInstance' => function ($query) {
-                $query->with(['tasks' => function ($taskQuery) {
-                    $taskQuery->where('status', 'pending')->with('assignedUser');
-                }]);
-            },
-        ])
+        $workflows = Workflow::with(['formTemplate', 'creator'])
+            ->withCount([
+                'processInstances as total_instances_count',
+                'processInstances as active_instances_count' => function ($query) {
+                    $query->whereIn('status', ['running', 'waiting']);
+                },
+                'processInstances as completed_instances_count' => function ($query) {
+                    $query->where('status', 'completed');
+                },
+            ])
             ->latest()
             ->get()
-            ->map(function (Workflow $workflow) use ($showProcessTracking) {
-                $instance = $workflow->latestProcessInstance;
+            ->map(function (Workflow $workflow) {
+                // Her bir akışın düğüm sayısı
+                $nodes = $workflow->nodes ?? [];
+                $workflow->setAttribute('node_count', count($nodes));
 
-                $runtimeStatus = null;
-                if ($instance) {
-                    $runtimeStatus = match ($instance->status) {
-                        'completed' => 'completed',
-                        'cancelled' => 'cancelled',
-                        default => 'in_progress',
-                    };
+                // Kategori listesi (array veya string)
+                $category = $workflow->category;
+                if (is_string($category)) {
+                    $decoded = json_decode($category, true);
+                    $category = is_array($decoded) ? $decoded : [$category];
                 }
+                $workflow->setAttribute('categories_list', is_array($category) ? array_filter($category) : []);
 
-                $workflow->setAttribute('runtime_status', $runtimeStatus);
-                $workflow->setAttribute('latest_instance_id', $instance?->id);
-                $workflow->setAttribute('duration', $this->buildDurationSummary($instance));
-
-                if ($showProcessTracking) {
-                    $workflow->setAttribute('process_tracking', $this->buildProcessTracking($workflow, $instance));
-                }
+                // Versiyon Bilgileri
+                $workflow->setAttribute('version_number', $workflow->version ?: 1);
+                $workflow->setAttribute('is_latest_version', (bool) ($workflow->is_latest ?? true));
+                $rootId = $workflow->parent_workflow_id ?: $workflow->id;
+                $workflow->setAttribute('root_workflow_id', $rootId);
 
                 return $workflow;
             });
 
+        // Tüm mevcut kategorileri filtreleme için toplayalım
+        $categories = collect($workflows)
+            ->flatMap(fn($w) => $w->categories_list)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $canManage = $user->hasRole('Admin')
+            || $user->hasRole('superadmin')
+            || $user->can('manage_workflows');
+
         return Inertia::render('Workflow/Index', [
             'workflows' => $workflows,
+            'categories' => $categories,
+            'canManage' => $canManage,
             'showProcessTracking' => $showProcessTracking,
         ]);
     }
@@ -74,8 +90,10 @@ class WorkflowController extends Controller
     public function create()
     {
         $forms = FormTemplate::where('is_active', true)->get();
-        $users = User::select('id', 'name', 'email')->get();
-        $departments = Department::select('id', 'name')->get();
+        $users = User::select('id', 'name', 'email', 'department_id', 'title')->get();
+        $departments = Department::with(['allManagers' => function($q) {
+            $q->select('users.id', 'users.name', 'users.email', 'users.title');
+        }])->select('id', 'name')->get();
         $directorates = Directorate::select('id', 'name')->get();
         $roles = Role::select('id', 'name')->get();
         $workflowCategories = WorkflowCategory::select('id', 'name')->get();
@@ -116,20 +134,33 @@ class WorkflowController extends Controller
     public function edit(Workflow $workflow)
     {
         $forms = FormTemplate::where('is_active', true)->get();
-        $users = User::select('id', 'name', 'email')->get();
-        $departments = Department::select('id', 'name')->get();
+        $users = User::select('id', 'name', 'email', 'department_id', 'title')->get();
+        $departments = Department::with(['allManagers' => function($q) {
+            $q->select('users.id', 'users.name', 'users.email', 'users.title');
+        }])->select('id', 'name')->get();
         $directorates = Directorate::select('id', 'name')->get();
         $roles = Role::select('id', 'name')->get();
         $workflowCategories = WorkflowCategory::select('id', 'name')->get();
+
+        $allVersions = $workflow->allVersions()->map(fn($w) => [
+            'id'            => $w->id,
+            'version'       => $w->version ?: 1,
+            'is_latest'     => (bool) ($w->is_latest ?? true),
+            'status'        => $w->status,
+            'version_notes' => $w->version_notes,
+            'created_at'    => $w->created_at->format('d.m.Y H:i'),
+            'node_count'    => count($w->nodes ?? []),
+        ]);
         
         return Inertia::render('Workflow/Designer', [
-            'workflow' => $workflow,
-            'forms' => $forms,
-            'users' => $users,
-            'departments' => $departments,
-            'directorates' => $directorates,
-            'roles' => $roles,
-            'workflowCategories' => $workflowCategories
+            'workflow'           => $workflow,
+            'forms'              => $forms,
+            'users'              => $users,
+            'departments'        => $departments,
+            'directorates'       => $directorates,
+            'roles'              => $roles,
+            'workflowCategories' => $workflowCategories,
+            'workflowVersions'   => $allVersions,
         ]);
     }
 
@@ -140,6 +171,149 @@ class WorkflowController extends Controller
         $workflow->update($validated);
 
         return $this->redirectAfterSave($workflow, $validated, $request);
+    }
+
+    public function destroy(Workflow $workflow)
+    {
+        // 1. Devam eden canlı talep kontrolü
+        $activeInstancesCount = $workflow->processInstances()
+            ->whereIn('status', ['running', 'waiting'])
+            ->count();
+
+        if ($activeInstancesCount > 0) {
+            return redirect()->back()->with('error', "Bu akış şablonuna bağlı yürüyen {$activeInstancesCount} adet canlı talep bulunmaktadır. Süreçler tamamlanmadan şablon silinemez. Dilerseniz şablonu 'Taslak' veya 'Arşivli' durumuna alabilirsiniz.");
+        }
+
+        $name = $workflow->name;
+        $workflow->delete();
+
+        return redirect()->route('workflows.index')->with('success', "'{$name}' adlı iş akış şablonu başarıyla silindi.");
+    }
+
+    public function toggleStatus(Workflow $workflow)
+    {
+        $newStatus = $workflow->status === 'active' ? 'draft' : 'active';
+        $workflow->update(['status' => $newStatus]);
+
+        $statusLabel = $newStatus === 'active' ? 'Yayına alındı (Aktif)' : 'Taslağa çekildi (Pasif)';
+        return redirect()->back()->with('success', "'{$workflow->name}' şablonunun durumu '{$statusLabel}' olarak güncellendi.");
+    }
+
+    public function duplicate(Workflow $workflow)
+    {
+        $clone = $workflow->replicate();
+        $clone->name = $workflow->name . ' (Kopya)';
+        $clone->status = 'draft';
+        $clone->created_by = auth()->id();
+        $clone->created_at = now();
+        $clone->updated_at = now();
+        $clone->save();
+
+        return redirect()->route('workflows.edit', $clone->id)->with('success', "'{$workflow->name}' şablonu başarıyla kopyalandı. Tasarımcı ekranından düzenleyebilirsiniz.");
+    }
+
+    /**
+     * Akışı yeni bir versiyon olarak yayınlar (v+1) ve eskisini arşivler.
+     */
+    public function publishVersion(Request $request, Workflow $workflow)
+    {
+        $validated = $this->validatedWorkflowPayload($request);
+        $versionNotes = $request->input('version_notes', 'Tasarımcı üzerinden yeni versiyon yayınlandı.');
+
+        $newWorkflow = $workflow->createNextVersion($validated, $versionNotes, (int) auth()->id());
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success'      => true,
+                'message'      => "Yeni versiyon (v{$newWorkflow->version}.0) başarıyla yayınlandı.",
+                'workflow'     => $newWorkflow,
+                'redirect_url' => route('workflows.edit', $newWorkflow->id),
+            ]);
+        }
+
+        return redirect()->route('workflows.edit', $newWorkflow->id)
+            ->with('success', "Yeni versiyon (v{$newWorkflow->version}.0) başarıyla yayınlandı. Eski versiyona bağlı canlı süreçler etkilenmeden çalışmaya devam edecektir.");
+    }
+
+    /**
+     * Bu akış ailesine ait tüm versiyonları döner.
+     */
+    public function versions(Workflow $workflow)
+    {
+        $versions = $workflow->allVersions()->map(function (Workflow $w) {
+            return [
+                'id'                     => $w->id,
+                'version'                => $w->version ?: 1,
+                'is_latest'              => (bool) ($w->is_latest ?? true),
+                'status'                 => $w->status,
+                'version_notes'          => $w->version_notes,
+                'created_at'             => $w->created_at->format('d.m.Y H:i'),
+                'node_count'             => count($w->nodes ?? []),
+                'active_instances_count' => $w->processInstances()->whereIn('status', ['running', 'waiting'])->count(),
+                'total_instances_count'  => $w->processInstances()->count(),
+            ];
+        });
+
+        return response()->json([
+            'workflow_id' => $workflow->id,
+            'root_id'     => $workflow->parent_workflow_id ?: $workflow->id,
+            'versions'    => $versions,
+        ]);
+    }
+
+    /**
+     * Canlı süreç göçü için düğüm eşleştirme şemasını döner.
+     */
+    public function migrationSchema(Workflow $workflow, Request $request, WorkflowMigrationService $migrationService)
+    {
+        $targetWorkflowId = $request->input('target_workflow_id');
+        $targetWorkflow = $targetWorkflowId 
+            ? Workflow::findOrFail($targetWorkflowId) 
+            : $workflow->allVersions()->firstWhere('is_latest', true);
+
+        if (!$targetWorkflow) {
+            $targetWorkflow = $workflow;
+        }
+
+        $schema = $migrationService->getMigrationSchema($workflow, $targetWorkflow);
+
+        return response()->json($schema);
+    }
+
+    /**
+     * Canlı çalışan süreçleri eski versiyondan yeni versiyona taşır.
+     */
+    public function migrateInstances(Request $request, Workflow $workflow, WorkflowMigrationService $migrationService)
+    {
+        $request->validate([
+            'target_workflow_id' => 'required|exists:workflows,id',
+            'node_mapping'       => 'required|array',
+            'instance_ids'       => 'nullable|array',
+        ]);
+
+        $targetWorkflow = Workflow::findOrFail($request->input('target_workflow_id'));
+        $nodeMapping = (array) $request->input('node_mapping');
+        $instanceIds = $request->input('instance_ids');
+
+        $result = $migrationService->migrateInstances(
+            $workflow,
+            $targetWorkflow,
+            $nodeMapping,
+            $instanceIds,
+            (int) auth()->id()
+        );
+
+        $msg = "{$result['migrated_instances_count']} adet canlı süreç kesintisiz (Zero-Downtime) olarak v{$result['target_version']}.0 versiyonuna taşındı. {$result['updated_tasks_count']} aktif görev güncellendi.";
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => $msg,
+                'data'    => $result,
+            ]);
+        }
+
+        return redirect()->back()->with('success', $msg);
     }
 
     private function redirectAfterSave(Workflow $workflow, array $validated, Request $request)

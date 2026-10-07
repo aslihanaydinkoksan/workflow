@@ -7,15 +7,32 @@ const props = defineProps({
     followUps: Object,
     filters: Object,
     stats: Object,
+    availableWorkflows: {
+        type: Array,
+        default: () => []
+    },
 });
 
 const search = ref(props.filters.search || '');
 const currentStatus = ref(props.filters.status || 'all');
+const selectedWorkflow = ref(props.filters.workflow_id || 'all');
 
 const filterStatus = (status) => {
     currentStatus.value = status;
     router.get(route('follow-ups.index'), {
         status: status === 'all' ? null : status,
+        workflow_id: selectedWorkflow.value === 'all' ? null : selectedWorkflow.value,
+        search: search.value || null,
+    }, {
+        preserveState: true,
+        replace: true,
+    });
+};
+
+const handleWorkflowFilter = () => {
+    router.get(route('follow-ups.index'), {
+        status: currentStatus.value === 'all' ? null : currentStatus.value,
+        workflow_id: selectedWorkflow.value === 'all' ? null : selectedWorkflow.value,
         search: search.value || null,
     }, {
         preserveState: true,
@@ -26,6 +43,7 @@ const filterStatus = (status) => {
 const handleSearch = () => {
     router.get(route('follow-ups.index'), {
         status: currentStatus.value === 'all' ? null : currentStatus.value,
+        workflow_id: selectedWorkflow.value === 'all' ? null : selectedWorkflow.value,
         search: search.value || null,
     }, {
         preserveState: true,
@@ -139,14 +157,25 @@ const formatDate = (dateString) => {
                         </button>
                     </div>
 
-                    <!-- Search Input -->
-                    <div class="flex items-center gap-2">
+                    <!-- Search & Unit Filter -->
+                    <div class="flex flex-wrap items-center gap-2">
+                        <select 
+                            v-if="availableWorkflows && availableWorkflows.length > 0"
+                            v-model="selectedWorkflow" 
+                            @change="handleWorkflowFilter"
+                            class="rounded-lg border-gray-300 text-xs font-semibold focus:border-indigo-500 focus:ring-indigo-500 py-2 bg-white"
+                        >
+                            <option value="all">🏭 Tüm Birimler & Akışlar</option>
+                            <option v-for="wf in availableWorkflows" :key="wf.id" :value="wf.id">
+                                {{ wf.name }}
+                            </option>
+                        </select>
                         <input 
                             v-model="search"
                             @keyup.enter="handleSearch"
                             type="text" 
                             placeholder="Müşteri, ürün veya sipariş no ara..." 
-                            class="rounded-lg border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 w-full sm:w-64"
+                            class="rounded-lg border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500 w-full sm:w-60"
                         />
                         <button 
                             @click="handleSearch"

@@ -46,16 +46,16 @@ class ProcessEngine
         return $instance;
     }
 
-    public function onTaskCompleted(ProcessInstance $instance, string $action = 'approve'): void
+    public function onTaskCompleted(ProcessInstance $instance, string $action = 'approve', ?string $comment = null, ?string $fromNodeId = null): void
     {
         $instance->update(['status' => 'running']);
-        $this->advance($instance, $action);
+        $this->advance($instance, $action, $comment, $fromNodeId);
     }
 
     /**
      * Süreç akışını bir sonraki düğüme taşır ve hiyerarşik kuralları tetikler.
      */
-    public function advance(ProcessInstance $instance, string $action = 'approve'): void
+    public function advance(ProcessInstance $instance, string $action = 'approve', ?string $comment = null, ?string $fromNodeId = null): void
     {
         // VERİ TAZELİĞİ KORUMASI: Bellekteki bayat veriyi ez
         $instance->refresh();
@@ -64,9 +64,19 @@ class ProcessEngine
             return;
         }
 
+        // Onay veya ilerleme aksiyonunda eski ret bayrağını temizle
+        if (in_array($action, ['approve', 'approved'], true)) {
+            $instData = (array) ($instance->data ?? []);
+            if (!empty($instData['_force_rejected'])) {
+                unset($instData['_force_rejected']);
+                $instance->data = $instData;
+                $instance->save();
+            }
+        }
+
         $workflow = $instance->workflow;
         $graph = $this->normalizedGraph($workflow);
-        $currentNodeId = $instance->current_node_id;
+        $currentNodeId = $fromNodeId ?: $instance->current_node_id;
         $node = $this->getNodeById($graph['nodes'], $currentNodeId);
 
         if (!$node) {
@@ -74,25 +84,26 @@ class ProcessEngine
         }
 
         // BİTİŞ (END) DÜĞÜMÜ KONTROLÜ
-        if ($node['type'] === 'output' || ($node['data']['taskType'] ?? '') === 'end') {
+        if ($node['type'] === 'output' || $node['type'] === 'end' || ($node['data']['taskType'] ?? '') === 'end') {
             if ($this->taskManager->instanceHasPendingTasks($instance)) {
                 $instance->update(['status' => 'waiting']);
                 return;
             }
 
-            // GÜÇLÜ KORUMA (ZEHİRLİ HAP): Süreç herhangi bir aşamada iptal/ret yemişse mühür kontrolü yap
-            $isForceRejected = $instance->data['_force_rejected'] ?? false;
-
-            if ($isForceRejected) {
-                $finalStatus = 'rejected';
+            // Düğüm üzerinde açıkça tanımlanmış bir durum varsa (örn: completed veya rejected) önceliklidir
+            $nodeStatus = $node['data']['processStatus'] ?? null;
+            if ($nodeStatus) {
+                $finalStatus = $nodeStatus;
             } else {
-                $nodeStatus = $node['data']['processStatus'] ?? null;
-                if ($nodeStatus) {
-                    $finalStatus = $nodeStatus;
+                $isForceRejected = $instance->data['_force_rejected'] ?? false;
+                if ($isForceRejected) {
+                    $finalStatus = 'rejected';
                 } else {
-                    $finalStatus = in_array($instance->status, ['rejected', 'cancelled'], true)
-                        ? $instance->status
-                        : 'completed';
+                    $customName = $node['data']['customName'] ?? '';
+                    $label = $node['data']['label'] ?? '';
+                    $fullNodeName = mb_strtolower($customName . ' ' . $label, 'UTF-8');
+                    $isRejectNode = preg_match('/\b(iptal|red|ret|reddedildi|reddedilme)\b/i', $fullNodeName) === 1;
+                    $finalStatus = $isRejectNode ? 'rejected' : 'completed';
                 }
             }
 
@@ -157,6 +168,13 @@ class ProcessEngine
 
                 if ($matched->isNotEmpty()) {
                     $edges = $matched;
+                } elseif ($normalizedAction === 'revised') {
+                    // Revizyon istendiğinde eğer özel bir 'revised' kenarı çizilmemişse,
+                    // varsayılan olarak talebi başlatan kişiye (startNode) geri yönlendir
+                    $startNode = $this->findStartNode($graph['nodes']);
+                    if ($startNode) {
+                        $nextEdges = [['target' => $startNode['id']]];
+                    }
                 }
             }
 
@@ -165,6 +183,93 @@ class ProcessEngine
             }
         }
 
+        // 2. BPMN 2.0 PARALEL AĞ GEÇİTLERİ (FORK & JOIN) ÇÖZÜMLEMESİ
+        $resolvedNextEdges = [];
+        foreach ($nextEdges as $edge) {
+            $targetId = $edge['target'];
+            $targetNode = $this->getNodeById($graph['nodes'], $targetId);
+
+            if ($this->isParallelForkNode($targetNode)) {
+                // PARALEL DALLANMA (AND-FORK):
+                // Fork'un tüm çıkış kenarlarını eş zamanlı çöz ve dallandır
+                $forkEdges = collect($graph['edges'])->where('source', $targetId)->all();
+
+                $branchNames = [];
+                foreach ($forkEdges as $fe) {
+                    $bn = $this->getNodeById($graph['nodes'], $fe['target']);
+                    $branchNames[] = $bn['data']['customName'] ?? $bn['data']['label'] ?? $fe['target'];
+                    $resolvedNextEdges[] = $fe;
+                }
+
+                app(ProcessAuditService::class)->recordAdminIntervention(
+                    $instance,
+                    'parallel_fork',
+                    null,
+                    'BPMN 2.0 Paralel Dallanma (AND-Fork)',
+                    'Tekil Akış',
+                    count($forkEdges) . ' Paralel Kol: ' . implode(', ', $branchNames),
+                    'Süreç BPMN 2.0 Paralel Ağ Geçidi ile aynı anda ' . count($forkEdges) . ' operasyonel kola ayrıldı.'
+                );
+            } elseif ($this->isParallelJoinNode($targetNode)) {
+                // PARALEL BİRLEŞME (AND-JOIN / SYNCHRONIZATION BARRIER):
+                // Bu Join düğümüne gelen tüm paralel kolları tespit et
+                $incomingEdges = collect($graph['edges'])->where('target', $targetId);
+                $predecessors = $incomingEdges->pluck('source')->unique()->all();
+                $totalBranches = count($predecessors);
+
+                // Bu süreç örneğinde henüz tamamlanmamış (pending) öncül kollar var mı?
+                $pendingTasks = \App\Models\Task::where('process_instance_id', $instance->id)
+                    ->whereIn('node_id', $predecessors)
+                    ->where('status', 'pending')
+                    ->get();
+
+                if ($pendingTasks->isNotEmpty()) {
+                    // SENKRONİZASYON BEKLEMESİ: Diğer paralel kollar henüz bitmedi!
+                    $pendingNodeIds = $pendingTasks->pluck('node_id')->unique()->all();
+                    $pendingNames = [];
+                    foreach ($pendingNodeIds as $pnId) {
+                        $pn = $this->getNodeById($graph['nodes'], $pnId);
+                        $pendingNames[] = $pn['data']['customName'] ?? $pn['data']['label'] ?? $pnId;
+                    }
+                    $completedCount = max(0, $totalBranches - count($pendingNodeIds));
+
+                    app(ProcessAuditService::class)->recordAdminIntervention(
+                        $instance,
+                        'parallel_join_wait',
+                        null,
+                        'BPMN 2.0 Paralel Birleşme Beklemesi (AND-Join Barrier)',
+                        "Bekleyen Kollar: " . implode(', ', $pendingNames),
+                        "{$completedCount} / {$totalBranches} Kol Tamamlandı",
+                        "Paralel kollardan biri tamamlandı. Sürecin ilerlemesi için diğer kolların (" . implode(', ', $pendingNames) . ") tamamlanması bekleniyor."
+                    );
+
+                    $instance->update(['status' => 'waiting']);
+                    return; // İlerletmeden çık, diğer kolları bekle!
+                }
+
+                // TÜM PARALEL KOLLAR TAMAMLANDI -> SENKRONİZASYON BAŞARILI!
+                app(ProcessAuditService::class)->recordAdminIntervention(
+                    $instance,
+                    'parallel_join_sync',
+                    null,
+                    'BPMN 2.0 Paralel Kollar Senkronize Edildi (AND-Join Success)',
+                    "{$totalBranches} Paralel Kol",
+                    "Tüm Kollar Senkronize Edildi ({$totalBranches}/{$totalBranches})",
+                    "Tüm paralel operasyonlar başarıyla tamamlandı. Süreç birleştirilerek sonraki aşamaya aktarıldı."
+                );
+
+                // Join düğümünün çıkış kenarlarını sıradaki hedef olarak ekle
+                $joinOutgoing = collect($graph['edges'])->where('source', $targetId)->all();
+                foreach ($joinOutgoing as $joe) {
+                    $resolvedNextEdges[] = $joe;
+                }
+            } else {
+                $resolvedNextEdges[] = $edge;
+            }
+        }
+
+        $nextEdges = $resolvedNextEdges;
+
         // Çıkmaz sokak ise bitir
         if (empty($nextEdges)) {
             if ($this->taskManager->instanceHasPendingTasks($instance)) {
@@ -172,12 +277,16 @@ class ProcessEngine
                 return;
             }
 
-            $isForceRejected = $instance->data['_force_rejected'] ?? false;
-            if ($isForceRejected) {
-                $finalStatus = 'rejected';
+            $nodeStatus = $node['data']['processStatus'] ?? null;
+            if ($nodeStatus) {
+                $finalStatus = $nodeStatus;
             } else {
-                $nodeStatus = $node['data']['processStatus'] ?? null;
-                $finalStatus = $nodeStatus ?: (in_array($instance->status, ['rejected', 'cancelled'], true) ? $instance->status : 'completed');
+                $isForceRejected = $instance->data['_force_rejected'] ?? false;
+                if ($isForceRejected) {
+                    $finalStatus = 'rejected';
+                } else {
+                    $finalStatus = in_array($instance->status, ['rejected', 'cancelled'], true) ? $instance->status : 'completed';
+                }
             }
             $instance->update(['status' => $finalStatus]);
             if ($finalStatus === 'completed') {
@@ -197,25 +306,54 @@ class ProcessEngine
                 continue;
             }
 
-            // --- EVRENSEL RET YAKALAYICI (Kelime Sınırı Güvenliği: 'üretim' gibi kelimelerin 'ret' ile çakışmasını önler) ---
-            $customName = $nextNode['data']['customName'] ?? '';
-            $label = $nextNode['data']['label'] ?? '';
-            $fullNodeName = mb_strtolower($customName . ' ' . $label, 'UTF-8');
-            $normalizedName = str_replace(['ı', 'i̇', 'ğ', 'ü', 'ş', 'ö', 'ç'], ['i', 'i', 'g', 'u', 's', 'o', 'c'], $fullNodeName);
-
+            // Sadece gerçek ret kararlarında veya ret kuralında ret bayrağını işaretle
             $isRejectAction = ($action === 'rejected') || (($ruleAction->type ?? '') === 'reject_and_route');
-            $isRejectNode = preg_match('/\b(iptal|red|ret|reddedildi|reddedilme)\b/i', $normalizedName) === 1;
 
-            if ($isRejectAction || $isRejectNode) {
-                $data = $instance->data ?? [];
+            if ($isRejectAction) {
+                $data = (array) ($instance->data ?? []);
                 $data['_force_rejected'] = true;
                 $instance->data = $data;
                 $instance->save();
             }
 
             $taskType = $nextNode['data']['taskType'] ?? 'approval';
+            $isStartNode = ($nextNode['type'] ?? '') === 'start'
+                || ($nextNode['type'] ?? '') === 'input'
+                || $taskType === 'start'
+                || $nextNodeId === '1'
+                || $nextNodeId === 'node_start';
 
-            if (in_array($taskType, ['approval', 'form', 'review'], true)) {
+            if ($isStartNode) {
+                // Başlangıç düğümüne geri dönüş (Revizyon döngüsü):
+                // Süreci başlatan kişiye revizyon/güncelleme formu görevi atanır.
+                $startFormData = array_merge($nextNode['data'] ?? [], [
+                    'taskType'   => 'form',
+                    'subFormId'  => $nextNode['data']['subFormId'] ?? $instance->workflow->form_template_id,
+                    'assignType' => 'starter',
+                    'label'      => $nextNode['data']['label'] ?? 'Talebi Revize Et ve Yeniden Gönder',
+                ]);
+                $revisedStartNode = $nextNode;
+                $revisedStartNode['data'] = $startFormData;
+                $humanBranches[] = [$nextNodeId, $revisedStartNode];
+
+                // Başlatana revizyon bildirimi
+                $starterUser = $instance->starter;
+                if ($starterUser) {
+                    $reason = $comment ?: 'Talebiniz incelenmiş olup, revize edilerek yeniden gönderilmesi istenmiştir.';
+                    \App\Models\UserNotification::create([
+                        'user_id' => $starterUser->id,
+                        'type'    => 'system',
+                        'title'   => 'Talebiniz İçin Revizyon İstendi',
+                        'body'    => $reason,
+                        'data'    => [
+                            'url'                 => route('processes.tracker', $instance->id),
+                            'action_url'          => route('processes.tracker', $instance->id),
+                            'process_instance_id' => $instance->id,
+                            'reason'              => $reason,
+                        ],
+                    ]);
+                }
+            } elseif (in_array($taskType, ['approval', 'form', 'review'], true)) {
                 $humanBranches[] = [$nextNodeId, $nextNode];
             } else {
                 $autoBranches[] = [$nextNodeId, $nextNode];
@@ -223,6 +361,28 @@ class ProcessEngine
         }
 
         foreach ($humanBranches as [$nextNodeId, $nextNode]) {
+            // DoA Yetki Matrisi Kontrolü (Delegation of Authority - Fortune 500 Standardı):
+            // Eğer parasal tutar belirlenen onay eşiğinin altındaysa adımı otomatik geç
+            $doaEvaluation = app(\App\Services\DoaMatrixService::class)->evaluateNodeDoa($instance, $nextNode);
+            if ($doaEvaluation['bypass']) {
+                app(\App\Services\ProcessAuditService::class)->recordAdminIntervention(
+                    $instance,
+                    'doa_bypass',
+                    null,
+                    "DoA Finansal Yetki Matrisi Otomatik Onay/Geçiş",
+                    "Bekleyen: " . ($nextNode['data']['label'] ?? $nextNode['data']['customName'] ?? $nextNodeId),
+                    "Otomatik Geçildi (DoA Tutar Eşiği)",
+                    $doaEvaluation['reason']
+                );
+
+                $instance->update([
+                    'current_node_id' => $nextNodeId,
+                    'status'          => 'running',
+                ]);
+                $this->advance($instance, 'approve', $doaEvaluation['reason']);
+                return;
+            }
+
             foreach ($this->taskManager->createTasks($instance, $nextNodeId, $nextNode['data'] ?? []) as $task) {
                 unset($task);
             }
@@ -466,5 +626,41 @@ class ProcessEngine
         } catch (\Throwable $e) {
             Log::error("Süreç tamamlama hook hatası (FollowUp): " . $e->getMessage());
         }
+    }
+
+    /**
+     * Düğümün bir BPMN 2.0 Paralel Dallanma (AND-Fork Gateway) olup olmadığını denetler.
+     */
+    public function isParallelForkNode(?array $node): bool
+    {
+        if (!$node) return false;
+        $type = $node['type'] ?? '';
+        $data = $node['data'] ?? [];
+        $taskType = $data['taskType'] ?? '';
+        $label = mb_strtolower(($data['customName'] ?? '') . ' ' . ($data['label'] ?? '') . ' ' . ($node['id'] ?? ''), 'UTF-8');
+
+        return in_array($type, ['parallel_fork', 'parallel_gateway', 'parallelGateway', 'fork'], true)
+            || in_array($taskType, ['parallel_fork', 'fork'], true)
+            || str_contains($label, 'parallel_fork')
+            || str_contains($label, 'and-fork')
+            || str_contains($label, 'paralel dallanma');
+    }
+
+    /**
+     * Düğümün bir BPMN 2.0 Paralel Birleşme (AND-Join Gateway / Barrier) olup olmadığını denetler.
+     */
+    public function isParallelJoinNode(?array $node): bool
+    {
+        if (!$node) return false;
+        $type = $node['type'] ?? '';
+        $data = $node['data'] ?? [];
+        $taskType = $data['taskType'] ?? '';
+        $label = mb_strtolower(($data['customName'] ?? '') . ' ' . ($data['label'] ?? '') . ' ' . ($node['id'] ?? ''), 'UTF-8');
+
+        return in_array($type, ['parallel_join', 'join'], true)
+            || in_array($taskType, ['parallel_join', 'join'], true)
+            || str_contains($label, 'parallel_join')
+            || str_contains($label, 'and-join')
+            || str_contains($label, 'paralel birleşme');
     }
 }

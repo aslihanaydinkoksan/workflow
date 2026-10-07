@@ -59,7 +59,21 @@
                             @php
                                 $val = $formData[$element['id']] ?? '';
                                 if(is_array($val)) {
-                                    $val = implode(', ', $val);
+                                    if(isset($val['start']) || isset($val['end'])) {
+                                        $val = trim(($val['start'] ?? '') . ' - ' . ($val['end'] ?? '')) . (!empty($val['note']) ? ' (' . $val['note'] . ')' : '');
+                                    } elseif(isset($val['date'])) {
+                                        $val = ($val['date'] ?? '') . (!empty($val['note']) ? ' (' . $val['note'] . ')' : '');
+                                    } else {
+                                        $flattened = [];
+                                        foreach($val as $sub) {
+                                            if(is_array($sub)) {
+                                                $flattened[] = trim(($sub['start'] ?? $sub['date'] ?? '') . (!empty($sub['end']) ? ' - ' . $sub['end'] : '')) . (!empty($sub['note']) ? ' (' . $sub['note'] . ')' : '');
+                                            } else {
+                                                $flattened[] = (string)$sub;
+                                            }
+                                        }
+                                        $val = implode('; ', $flattened);
+                                    }
                                 } elseif(is_bool($val)) {
                                     $val = $val ? 'Evet / Onaylıyorum' : 'Hayır';
                                 }

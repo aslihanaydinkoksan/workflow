@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import { Head, Link } from '@inertiajs/vue3';
+import { Head, Link, router } from '@inertiajs/vue3';
 import { VueFlow } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
@@ -14,7 +14,29 @@ const props = defineProps({
     instances: {
         type: Array,
         default: () => [],
-    }
+    },
+    departmentInstances: {
+        type: Array,
+        default: () => [],
+    },
+    canViewDepartment: {
+        type: Boolean,
+        default: false,
+    },
+    departmentName: {
+        type: String,
+        default: 'Bölümünüz',
+    },
+    initialScope: {
+        type: String,
+        default: 'my',
+    },
+});
+
+const activeScope = ref(props.initialScope === 'department' && props.canViewDepartment ? 'department' : 'my');
+
+const currentRawList = computed(() => {
+    return activeScope.value === 'department' ? (props.departmentInstances || []) : (props.instances || []);
 });
 
 const searchQuery = ref('');
@@ -66,7 +88,7 @@ const getStatusName = (status) => {
 };
 
 const counts = computed(() => {
-    const list = props.instances || [];
+    const list = currentRawList.value || [];
     return {
         all: list.length,
         active: list.filter(i => ['running', 'waiting'].includes(i.status)).length,
@@ -76,7 +98,7 @@ const counts = computed(() => {
 });
 
 const filteredInstances = computed(() => {
-    let list = props.instances || [];
+    let list = currentRawList.value || [];
 
     // Durum filtresi
     if (statusFilter.value === 'active') {
@@ -95,12 +117,45 @@ const filteredInstances = computed(() => {
             const nameStr = (i.workflow?.name || '').toLocaleLowerCase('tr-TR');
             const statusStr = getStatusName(i.status).toLocaleLowerCase('tr-TR');
             const assignees = (i.tasks || []).map(t => t.assigned_user?.name || t.assigned_role || '').join(' ').toLocaleLowerCase('tr-TR');
-            return idStr.includes(q) || nameStr.includes(q) || statusStr.includes(q) || assignees.includes(q);
+            const starterStr = (i.starter?.name || '').toLocaleLowerCase('tr-TR');
+            return idStr.includes(q) || nameStr.includes(q) || statusStr.includes(q) || assignees.includes(q) || starterStr.includes(q);
         });
     }
 
     return list;
 });
+
+// Talep Geri Çekme / İptal Etme Modalı
+const isCancelModalOpen = ref(false);
+const instanceToCancel = ref(null);
+const cancelReason = ref('');
+const isCancelling = ref(false);
+
+const openCancelModal = (instance) => {
+    instanceToCancel.value = instance;
+    cancelReason.value = '';
+    isCancelModalOpen.value = true;
+};
+
+const closeCancelModal = () => {
+    isCancelModalOpen.value = false;
+    instanceToCancel.value = null;
+    cancelReason.value = '';
+    isCancelling.value = false;
+};
+
+const confirmCancelProcess = () => {
+    if (!instanceToCancel.value) return;
+    isCancelling.value = true;
+    router.post(route('processes.cancel', instanceToCancel.value.id), {
+        reason: cancelReason.value,
+    }, {
+        preserveScroll: true,
+        onFinish: () => {
+            closeCancelModal();
+        }
+    });
+};
 </script>
 
 <template>
@@ -136,6 +191,44 @@ const filteredInstances = computed(() => {
 
         <div class="py-8">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+
+                <!-- Talep Kapsamı Segmented Control (Benim Taleplerim vs Bölümümün Talepleri) -->
+                <div v-if="canViewDepartment" class="flex flex-wrap items-center justify-between gap-3 p-1.5 bg-slate-100/90 rounded-2xl border border-slate-200/80 shadow-xs max-w-fit">
+                    <button
+                        type="button"
+                        @click="activeScope = 'my'"
+                        :class="[
+                            'px-5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center gap-2',
+                            activeScope === 'my'
+                                ? 'bg-white text-indigo-700 shadow-sm border border-slate-200/60'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                        ]"
+                    >
+                        <span class="text-sm">👤</span>
+                        <span>Benim Açtığım Talepler</span>
+                        <span class="px-2 py-0.5 text-[11px] rounded-full"
+                            :class="activeScope === 'my' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200 text-slate-700'">
+                            {{ instances.length }}
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        @click="activeScope = 'department'"
+                        :class="[
+                            'px-5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center gap-2',
+                            activeScope === 'department'
+                                ? 'bg-white text-indigo-700 shadow-sm border border-slate-200/60'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                        ]"
+                    >
+                        <span class="text-sm">👥</span>
+                        <span>Bölümümün Talepleri ({{ departmentName }})</span>
+                        <span class="px-2 py-0.5 text-[11px] rounded-full"
+                            :class="activeScope === 'department' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200 text-slate-700'">
+                            {{ departmentInstances.length }}
+                        </span>
+                    </button>
+                </div>
 
                 <!-- Arama ve Durum Sekmeleri -->
                 <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-gray-200/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -210,7 +303,11 @@ const filteredInstances = computed(() => {
                         </div>
                         <h4 class="text-base font-bold text-gray-800">Kayıtlı Talep Bulunamadı</h4>
                         <p class="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
-                            {{ searchQuery ? 'Arama kriterlerinize uyan bir talep bulunamadı.' : 'Henüz başlattığınız aktif veya tamamlanmış bir süreç bulunmuyor.' }}
+                            {{ searchQuery
+                                ? 'Arama kriterlerinize uyan bir talep bulunamadı.'
+                                : (activeScope === 'department'
+                                    ? departmentName + ' departmanı adına açılmış bir süreç kaydı bulunamadı.'
+                                    : 'Henüz başlattığınız aktif veya tamamlanmış bir süreç bulunmuyor.') }}
                         </p>
                         <div class="mt-4">
                             <Link
@@ -248,8 +345,15 @@ const filteredInstances = computed(() => {
                                         <div class="text-sm font-bold text-gray-900 group-hover:text-indigo-600 transition-colors">
                                             {{ instance.workflow.name }}
                                         </div>
-                                        <div class="text-xs text-gray-400 font-mono">
-                                            {{ instance.workflow?.form_template?.code || 'Genel Akış' }}
+                                        <div class="flex items-center gap-2 mt-0.5">
+                                            <span class="text-xs text-gray-400 font-mono">
+                                                {{ instance.workflow?.form_template?.code || 'Genel Akış' }}
+                                            </span>
+                                            <span v-if="activeScope === 'department' && instance.starter"
+                                                class="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
+                                                <span>👤 Başlatan:</span>
+                                                <span>{{ instance.starter.name }}</span>
+                                            </span>
                                         </div>
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap">
@@ -290,20 +394,56 @@ const filteredInstances = computed(() => {
                                     <td class="px-6 py-4 whitespace-nowrap text-xs text-gray-500 font-mono">
                                         {{ new Date(instance.created_at).toLocaleString('tr-TR') }}
                                     </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-right text-xs font-medium space-x-2" @click.stop>
-                                        <button
-                                            @click="openPreview(instance.workflow)"
-                                            class="inline-flex items-center text-teal-700 hover:text-teal-900 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-xl font-bold transition-colors"
-                                        >
-                                            <span class="mr-1">🗺️</span> Şema
-                                        </button>
+                                    <td class="px-6 py-4 whitespace-nowrap text-right text-xs font-medium" @click.stop>
+                                        <div class="inline-flex items-center justify-end gap-1.5">
+                                            <!-- Benzer Talep Başlat (Clone) -->
+                                            <Link
+                                                :href="route('processes.create', [instance.workflow_id, { clone_from: instance.id }])"
+                                                class="inline-flex items-center text-teal-700 hover:text-teal-900 bg-teal-50 hover:bg-teal-100 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border border-teal-200"
+                                                title="Bu talebin form bilgilerini kopyalayarak yeni bir talep başlat"
+                                            >
+                                                <span class="mr-1">📋</span> Benzer Talep
+                                            </Link>
 
-                                        <Link
-                                            :href="route('processes.tracker', instance.id)"
-                                            class="inline-flex items-center text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-3.5 py-1.5 rounded-xl font-extrabold transition-colors shadow-sm"
-                                        >
-                                            <span class="mr-1">👉</span> Canlı Takip &rarr;
-                                        </Link>
+                                            <!-- Ön Onay Öncesi Düzelt (can_edit) -->
+                                            <Link
+                                                v-if="instance.can_edit"
+                                                :href="route('processes.edit', instance.id)"
+                                                class="inline-flex items-center text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border border-amber-200"
+                                                title="Henüz onaydan geçmediği için başvuru formunu düzelt"
+                                            >
+                                                <span class="mr-1">✏️</span> Düzelt
+                                            </Link>
+
+                                            <!-- Geri Çek / İptal Et (can_cancel) -->
+                                            <button
+                                                v-if="instance.can_cancel"
+                                                type="button"
+                                                @click="openCancelModal(instance)"
+                                                class="inline-flex items-center text-red-700 hover:text-red-900 bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border border-red-200"
+                                                title="Talebi geri çek / iptal et"
+                                            >
+                                                <span class="mr-1">❌</span> Geri Çek
+                                            </button>
+
+                                            <!-- Akış Şeması -->
+                                            <button
+                                                type="button"
+                                                @click="openPreview(instance.workflow)"
+                                                class="inline-flex items-center text-gray-700 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 px-2 py-1.5 rounded-lg text-xs font-semibold transition-colors border border-gray-200"
+                                                title="Akış şemasını önizle"
+                                            >
+                                                <span class="mr-1">🗺️</span> Şema
+                                            </button>
+
+                                            <!-- Canlı Takip -->
+                                            <Link
+                                                :href="route('processes.tracker', instance.id)"
+                                                class="inline-flex items-center text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-colors border border-indigo-200 shadow-2xs"
+                                            >
+                                                Takip &rarr;
+                                            </Link>
+                                        </div>
                                     </td>
                                 </tr>
                             </tbody>
@@ -331,6 +471,58 @@ const filteredInstances = computed(() => {
                         <Background pattern-color="#cbd5e1" gap="16" />
                         <Controls />
                     </VueFlow>
+                </div>
+            </div>
+        </div>
+
+        <!-- Talep Geri Çekme / İptal Etme Modalı -->
+        <div v-if="isCancelModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/80 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-gray-100">
+                <div class="p-6">
+                    <div class="w-14 h-14 mx-auto mb-4 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center text-2xl font-bold shadow-md shadow-red-200">
+                        ⚠️
+                    </div>
+                    <div class="text-center">
+                        <h3 class="text-lg font-bold text-gray-900">Talebi Geri Çek / İptal Et</h3>
+                        <p class="text-xs text-gray-500 mt-1">
+                            Talep No: <strong class="text-indigo-700 font-mono">#{{ instanceToCancel?.id }}</strong> — {{ instanceToCancel?.workflow?.name }}
+                        </p>
+                        <p class="text-xs text-red-600 mt-2 font-medium">
+                            Bu talebi geri çektiğinizde, atanmış olan bekleyen tüm görevler iptal edilir ve süreç sonlandırılır.
+                        </p>
+                    </div>
+
+                    <div class="mt-4">
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5">
+                            Geri Çekme / İptal Gerekçesi (Opsiyonel):
+                        </label>
+                        <textarea
+                            v-model="cancelReason"
+                            rows="3"
+                            placeholder="Talebinizi neden geri çektiğinizi belirtebilirsiniz (örn: Müşteri siparişi revize etti, mükerrer talep vb.)..."
+                            class="w-full text-xs rounded-xl border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 placeholder-gray-400"
+                        ></textarea>
+                    </div>
+
+                    <div class="mt-6 flex items-center justify-end gap-3">
+                        <button
+                            type="button"
+                            @click="closeCancelModal"
+                            :disabled="isCancelling"
+                            class="px-4 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors disabled:opacity-50"
+                        >
+                            Vazgeç
+                        </button>
+                        <button
+                            type="button"
+                            @click="confirmCancelProcess"
+                            :disabled="isCancelling"
+                            class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-md shadow-red-600/20 transition-all disabled:opacity-50"
+                        >
+                            <svg v-if="isCancelling" class="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            <span>{{ isCancelling ? 'İptal Ediliyor...' : 'Evet, Talebi Geri Çek' }}</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
