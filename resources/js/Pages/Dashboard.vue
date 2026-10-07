@@ -48,22 +48,22 @@ const getTaskTitle = (task) => {
     <AuthenticatedLayout>
         <template #header>
             <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div>
-                    <h2 class="font-extrabold text-2xl text-gray-900 leading-tight flex items-center gap-2">
-                        Hoş Geldiniz, {{ user.name }} 👋
+                <div class="min-w-0">
+                    <h2 class="font-extrabold text-xl sm:text-2xl text-gray-900 leading-tight flex flex-wrap items-center gap-2">
+                        <span>Hoş Geldiniz, {{ user.name }}</span> <span class="inline-block">👋</span>
                     </h2>
-                    <p class="text-sm text-gray-500 mt-1 flex items-center gap-2">
-                        <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <p class="text-xs sm:text-sm text-gray-500 mt-1 flex flex-wrap items-center gap-1.5 sm:gap-2">
+                        <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
                         <span class="font-semibold text-gray-700">{{ user.title || 'Personel' }}</span>
-                        <span>&bull;</span>
-                        <span>{{ user.department?.name || 'Köksan Pet ve Plastik Ambalaj Sanayi A.Ş.' }}</span>
+                        <span class="text-gray-300">&bull;</span>
+                        <span class="truncate">{{ user.department?.name || 'Köksan Pet ve Plastik Ambalaj Sanayi A.Ş.' }}</span>
                     </p>
                 </div>
 
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-3 shrink-0">
                     <Link
                         :href="route('processes.index')"
-                        class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md hover:shadow-lg transition-all"
+                        class="inline-flex items-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm shadow-md hover:shadow-lg transition-all"
                     >
                         <span>🚀</span> Yeni Talep Başlat
                     </Link>
@@ -71,32 +71,32 @@ const getTaskTitle = (task) => {
             </div>
         </template>
 
-        <div class="py-8">
-            <div class="max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-8">
+        <div class="py-6 sm:py-8">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 sm:space-y-8">
 
                 <!-- 1. ÜÇ BÜYÜK CANLI AKSİYON KARTI -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-5 sm:gap-6">
                     
                     <!-- Kart 1: İş Listem -->
                     <Link 
                         :href="route('tasks.index')"
-                        class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-500 via-rose-600 to-red-600 p-6 text-white shadow-lg hover:shadow-2xl hover:-translate-y-0.5 transition-all duration-300"
+                        class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-500 via-rose-600 to-red-600 p-5 sm:p-6 text-white shadow-lg hover:shadow-2xl hover:-translate-y-0.5 transition-all duration-300"
                     >
-                        <div class="relative z-10 flex items-start justify-between">
-                            <div>
-                                <span class="text-xs font-bold tracking-wider uppercase text-rose-100 block mb-1">
+                        <div class="relative z-10 flex items-start justify-between gap-3">
+                            <div class="min-w-0 flex-1">
+                                <span class="text-[11px] sm:text-xs font-bold tracking-wider uppercase text-rose-100 block mb-1">
                                     Gelen Kutusu
                                 </span>
-                                <h3 class="text-xl font-black">Bekleyen İşlerim</h3>
-                                <p class="text-xs text-rose-100/90 mt-1 max-w-[220px]">
+                                <h3 class="text-lg sm:text-xl font-black">Bekleyen İşlerim</h3>
+                                <p class="text-xs text-rose-100/90 mt-1 line-clamp-2">
                                     Onayınızı veya bilgi girişinizi bekleyen görevler.
                                 </p>
                             </div>
-                            <div class="text-right">
-                                <span class="text-4xl font-black tracking-tight block">
+                            <div class="text-right shrink-0">
+                                <span class="text-3xl sm:text-4xl font-black tracking-tight block">
                                     {{ stats.pending_tasks_count }}
                                 </span>
-                                <span class="text-[11px] font-bold text-rose-200">Görev</span>
+                                <span class="text-[10px] sm:text-[11px] font-bold text-rose-200">Görev</span>
                             </div>
                         </div>
                         <div class="mt-4 pt-4 border-t border-rose-400/30 flex items-center justify-between text-xs font-bold text-rose-100 group-hover:text-white">
@@ -109,23 +109,23 @@ const getTaskTitle = (task) => {
                     <!-- Kart 2: Devam Eden Taleplerim -->
                     <Link 
                         :href="route('processes.history')"
-                        class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-indigo-700 p-6 text-white shadow-lg hover:shadow-2xl hover:-translate-y-0.5 transition-all duration-300"
+                        class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-indigo-700 p-5 sm:p-6 text-white shadow-lg hover:shadow-2xl hover:-translate-y-0.5 transition-all duration-300"
                     >
-                        <div class="relative z-10 flex items-start justify-between">
-                            <div>
-                                <span class="text-xs font-bold tracking-wider uppercase text-indigo-200 block mb-1">
+                        <div class="relative z-10 flex items-start justify-between gap-3">
+                            <div class="min-w-0 flex-1">
+                                <span class="text-[11px] sm:text-xs font-bold tracking-wider uppercase text-indigo-200 block mb-1">
                                     Başlattıklarım
                                 </span>
-                                <h3 class="text-xl font-black">Devam Eden Taleplerim</h3>
-                                <p class="text-xs text-indigo-100/90 mt-1 max-w-[220px]">
+                                <h3 class="text-lg sm:text-xl font-black">Devam Eden Taleplerim</h3>
+                                <p class="text-xs text-indigo-100/90 mt-1 line-clamp-2">
                                     Açtığınız ve onay süreçlerinde ilerleyen talepler.
                                 </p>
                             </div>
-                            <div class="text-right">
-                                <span class="text-4xl font-black tracking-tight block">
+                            <div class="text-right shrink-0">
+                                <span class="text-3xl sm:text-4xl font-black tracking-tight block">
                                     {{ stats.my_running_count }}
                                 </span>
-                                <span class="text-[11px] font-bold text-indigo-200">Süreç</span>
+                                <span class="text-[10px] sm:text-[11px] font-bold text-indigo-200">Süreç</span>
                             </div>
                         </div>
                         <div class="mt-4 pt-4 border-t border-indigo-400/30 flex items-center justify-between text-xs font-bold text-indigo-100 group-hover:text-white">
@@ -138,23 +138,23 @@ const getTaskTitle = (task) => {
                     <!-- Kart 3: Takipler & Geri Bildirim -->
                     <Link 
                         :href="route('follow-ups.index')"
-                        class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-purple-600 via-purple-700 to-fuchsia-700 p-6 text-white shadow-lg hover:shadow-2xl hover:-translate-y-0.5 transition-all duration-300"
+                        class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-purple-600 via-purple-700 to-fuchsia-700 p-5 sm:p-6 text-white shadow-lg hover:shadow-2xl hover:-translate-y-0.5 transition-all duration-300"
                     >
-                        <div class="relative z-10 flex items-start justify-between">
-                            <div>
-                                <span class="text-xs font-bold tracking-wider uppercase text-purple-200 block mb-1">
+                        <div class="relative z-10 flex items-start justify-between gap-3">
+                            <div class="min-w-0 flex-1">
+                                <span class="text-[11px] sm:text-xs font-bold tracking-wider uppercase text-purple-200 block mb-1">
                                     Süreç Sonrası
                                 </span>
-                                <h3 class="text-xl font-black">Takipler & Geri Bildirim</h3>
-                                <p class="text-xs text-purple-100/90 mt-1 max-w-[220px]">
+                                <h3 class="text-lg sm:text-xl font-black">Takipler & Geri Bildirim</h3>
+                                <p class="text-xs text-purple-100/90 mt-1 line-clamp-2">
                                     Tamamlanan süreçlerin sonuç ve sipariş durumları.
                                 </p>
                             </div>
-                            <div class="text-right">
-                                <span class="text-4xl font-black tracking-tight block">
+                            <div class="text-right shrink-0">
+                                <span class="text-3xl sm:text-4xl font-black tracking-tight block">
                                     {{ stats.pending_follow_ups_count }}
                                 </span>
-                                <span class="text-[11px] font-bold text-purple-200">Bekleyen</span>
+                                <span class="text-[10px] sm:text-[11px] font-bold text-purple-200">Bekleyen</span>
                             </div>
                         </div>
                         <div class="mt-4 pt-4 border-t border-purple-400/30 flex items-center justify-between text-xs font-bold text-purple-100 group-hover:text-white">

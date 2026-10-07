@@ -338,17 +338,17 @@ onBeforeUnmount(() => {
             <!-- Modern Top Navigation -->
             <nav class="bg-white shadow-sm border-b border-gray-100 sticky top-0 z-40">
                 <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-                    <div class="flex h-20 justify-between">
-                        <div class="flex">
+                    <div class="flex h-16 sm:h-20 justify-between items-center">
+                        <div class="flex items-center min-w-0">
                             <!-- Logo Area -->
                             <div class="flex shrink-0 items-center">
-                                <Link :href="route('dashboard')" class="flex items-center gap-3 group">
-                                    <ApplicationLogo class="h-12 w-auto object-contain" />
-                                    <div>
-                                        <h1 class="text-xl font-black tracking-tight text-gray-900 leading-none">KÖKSAN
+                                <Link :href="route('dashboard')" class="flex items-center gap-2 sm:gap-3 group">
+                                    <ApplicationLogo class="h-10 sm:h-12 w-auto object-contain shrink-0" />
+                                    <div class="shrink-0">
+                                        <h1 class="text-lg sm:text-xl font-black tracking-tight text-gray-900 leading-none">KÖKSAN
                                         </h1>
                                         <span
-                                            class="text-[10px] font-bold text-indigo-600 tracking-widest uppercase">Süreç
+                                            class="text-[9px] sm:text-[10px] font-bold text-indigo-600 tracking-widest uppercase">Süreç
                                             Portalı</span>
                                     </div>
                                 </Link>
@@ -569,9 +569,10 @@ onBeforeUnmount(() => {
                         </div>
 
                         <!-- Hamburger -->
-                        <div class="-mr-2 flex items-center sm:hidden">
+                        <div class="flex items-center sm:hidden shrink-0 ml-2">
                             <button @click="showingNavigationDropdown = !showingNavigationDropdown"
-                                class="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 focus:text-gray-500 transition duration-150 ease-in-out">
+                                class="inline-flex items-center justify-center p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus:outline-none transition duration-150 ease-in-out"
+                                aria-label="Menüyü Aç/Kapat">
                                 <svg class="h-6 w-6" stroke="currentColor" fill="none" viewBox="0 0 24 24">
                                     <path
                                         :class="{ 'hidden': showingNavigationDropdown, 'inline-flex': !showingNavigationDropdown }"

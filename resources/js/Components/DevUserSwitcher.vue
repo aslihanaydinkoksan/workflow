@@ -177,8 +177,8 @@ const switchUser = (user) => {
         </div>
 
         <!-- Expanded Top Bar (Navigasyonun Üstünde Kurumsal Test Çubuğu) -->
-        <div v-else class="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white border-b border-slate-800 shadow-md relative z-40 transition-all duration-300">
-            <div class="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center justify-between gap-2">
+        <div v-else class="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white border-b border-slate-800 shadow-md relative z-40 transition-all duration-300 w-full overflow-hidden">
+            <div class="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center justify-between gap-2 overflow-x-auto">
                 
                 <!-- Sol Kısım: Aktif Profil Rozeti -->
                 <div class="flex items-center gap-2.5">
