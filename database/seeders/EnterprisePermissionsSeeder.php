@@ -10,6 +10,9 @@ class EnterprisePermissionsSeeder extends Seeder
 {
     public function run(): void
     {
+        // Spatie izin önbelleğini sıfırla (PermissionDoesNotExist önbellek çakışmasını engeller)
+        app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+
         $permissions = [
             // 1. İş Zekası & Power BI
             'reports.view',
@@ -58,19 +61,30 @@ class EnterprisePermissionsSeeder extends Seeder
             'tasks.admin_bulk_delete',
         ];
 
-
         foreach ($permissions as $p) {
             Permission::firstOrCreate(['name' => $p, 'guard_name' => 'web']);
         }
 
-        // Admin rolüne TÜM yetkileri ver
+        // İzinler veritabanına eklendikten sonra önbelleği tekrar sıfırla
+        app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+
+        // Güvenli izin atama yardımcısı (Model bazlı sorgulama ile önbellek/guard hatasını önler)
+        $safeGivePermissions = function ($role, array $permissionNames) {
+            if (!$role) return;
+            $perms = Permission::whereIn('name', $permissionNames)
+                ->where('guard_name', $role->guard_name)
+                ->get();
+            $role->givePermissionTo($perms);
+        };
+
+        // Admin rolüne TÜM web yetkilerini ver
         $admin = Role::firstOrCreate(['name' => 'Admin', 'guard_name' => 'web']);
-        $admin->syncPermissions(Permission::all());
+        $admin->syncPermissions(Permission::where('guard_name', 'web')->get());
 
         // Süreç Tasarımcısı rolüne yetkiler
         $designerRole = Role::where('name', 'Süreç Tasarımcısı')->first();
         if ($designerRole) {
-            $designerRole->givePermissionTo([
+            $safeGivePermissions($designerRole, [
                 'designer.view', 'designer.edit', 'designer.publish_version',
                 'reports.view', 'reports.export_excel', 'reports.export_pdf',
                 'audit.view_diff', 'termin.view_sla'
@@ -80,7 +94,7 @@ class EnterprisePermissionsSeeder extends Seeder
         // Müdür ve Direktör rollerine yetkiler
         $directorRole = Role::where('name', 'Direktör')->first();
         if ($directorRole) {
-            $directorRole->givePermissionTo([
+            $safeGivePermissions($directorRole, [
                 'reports.view', 'reports.export_excel', 'reports.export_pdf',
                 'termin.view_sla', 'termin.override',
                 'travel.request', 'travel.approve_manager', 'travel.approve_gmy', 'travel.download_order',
@@ -92,7 +106,7 @@ class EnterprisePermissionsSeeder extends Seeder
 
         $managerRole = Role::where('name', 'Müdür')->first();
         if ($managerRole) {
-            $managerRole->givePermissionTo([
+            $safeGivePermissions($managerRole, [
                 'reports.view', 'reports.export_excel', 'reports.export_pdf',
                 'termin.view_sla', 'termin.reschedule',
                 'travel.request', 'travel.approve_manager', 'travel.download_order',
@@ -104,7 +118,7 @@ class EnterprisePermissionsSeeder extends Seeder
 
         $chiefRole = Role::where('name', 'Amir')->first();
         if ($chiefRole) {
-            $chiefRole->givePermissionTo([
+            $safeGivePermissions($chiefRole, [
                 'termin.view_sla', 'termin.reschedule',
                 'travel.request', 'travel.approve_manager',
                 'samples.download_coa',
@@ -113,7 +127,7 @@ class EnterprisePermissionsSeeder extends Seeder
 
         $userRole = Role::where('name', 'Kullanıcı')->first();
         if ($userRole) {
-            $userRole->givePermissionTo([
+            $safeGivePermissions($userRole, [
                 'travel.request',
             ]);
         }
