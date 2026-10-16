@@ -186,6 +186,9 @@ class PermissionRegistryService
         'tasks.admin_edit' => ['label' => 'Yönetici Görev Düzenleme & Devretme', 'desc' => 'Bekleyen görevlerin atanan yetkilisini, vadesini veya durumunu yönetici olarak düzenleyebilir.'],
         'tasks.admin_delete' => ['label' => 'Görev & Test Süreci Silme (Soft Delete)', 'desc' => 'Test veya hatalı görev ve süreçleri güvenli şekilde soft delete ile arşivleyip temizleyebilir.'],
         'tasks.admin_bulk_delete' => ['label' => 'Toplu Görev & Süreç Temizleme', 'desc' => 'İş listesindeki birden fazla test görevini tek tıkla toplu olarak soft delete ile temizleyebilir.'],
+        'workflows.create' => ['label' => 'Yeni İş Akışı & Süreç Oluşturma', 'desc' => 'Süreç kataloğunda yeni iş akışı şablonu oluşturabilir ve BPMN tasarımcısını başlatabilir.'],
+        'workflows.edit' => ['label' => 'İş Akışı Şablonunu Düzenleme', 'desc' => 'Süreç kataloğunda akış başlığı, açıklama, kategori ve aktif/pasif durumunu düzenleyebilir.'],
+        'workflows.delete' => ['label' => 'İş Akışı Şablonunu Silme (Soft Delete)', 'desc' => 'Test veya eski iş akışı şablonlarını güvenli şekilde soft delete ile arşivleyip gizleyebilir.'],
         'manage_workflows' => ['label' => 'İş Akışı Şablonlarını Yönetme', 'desc' => 'Sistemdeki iş akışı modellerini yönetir.'],
 
         'create_forms' => ['label' => 'Yeni Form Şablonu Oluşturma', 'desc' => 'Form tasarımcısıyla yeni şablonlar tasarlar.'],
@@ -325,7 +328,7 @@ class PermissionRegistryService
                 'duty_radar', 'duty-radar' => 'duty_radar',
                 'audit', 'governance', 'mail' => 'governance',
                 'designer', 'templates' => 'designer',
-                'processes', 'tasks' => 'processes',
+                'processes', 'tasks', 'workflows' => 'processes',
                 'procurement' => 'procurement',
                 'warehouse' => 'warehouse',
                 'maintenance' => 'maintenance',

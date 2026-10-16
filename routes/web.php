@@ -58,17 +58,22 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::resource('form-templates', \App\Http\Controllers\FormTemplateController::class);
     });
 
-    // Süreç Akış Kataloğu & Tasarımı
+    // Süreç Akış Kataloğu & BPMN Tasarımı (Yetkiler Controller İçinde authorizeAction ile Denetlenir)
     Route::get('/workflows', [\App\Http\Controllers\WorkflowController::class, 'index'])->name('workflows.index');
-    Route::middleware('can:manage_workflows')->group(function () {
-        Route::post('/workflows/{workflow}/toggle-status', [\App\Http\Controllers\WorkflowController::class, 'toggleStatus'])->name('workflows.toggle-status');
-        Route::post('/workflows/{workflow}/duplicate', [\App\Http\Controllers\WorkflowController::class, 'duplicate'])->name('workflows.duplicate');
-        Route::post('/workflows/{workflow}/publish-version', [\App\Http\Controllers\WorkflowController::class, 'publishVersion'])->name('workflows.publish-version');
-        Route::get('/workflows/{workflow}/versions', [\App\Http\Controllers\WorkflowController::class, 'versions'])->name('workflows.versions');
-        Route::get('/workflows/{workflow}/migration-schema', [\App\Http\Controllers\WorkflowController::class, 'migrationSchema'])->name('workflows.migration-schema');
-        Route::post('/workflows/{workflow}/migrate-instances', [\App\Http\Controllers\WorkflowController::class, 'migrateInstances'])->name('workflows.migrate-instances');
-        Route::resource('workflows', \App\Http\Controllers\WorkflowController::class)->except(['index']);
-    });
+    Route::post('/workflows/{workflow}/toggle-status', [\App\Http\Controllers\WorkflowController::class, 'toggleStatus'])->name('workflows.toggle-status');
+    Route::post('/workflows/{workflow}/duplicate', [\App\Http\Controllers\WorkflowController::class, 'duplicate'])->name('workflows.duplicate');
+    Route::post('/workflows/{workflow}/publish-version', [\App\Http\Controllers\WorkflowController::class, 'publishVersion'])->name('workflows.publish-version');
+    Route::get('/workflows/{workflow}/versions', [\App\Http\Controllers\WorkflowController::class, 'versions'])->name('workflows.versions');
+    Route::get('/workflows/{workflow}/migration-schema', [\App\Http\Controllers\WorkflowController::class, 'migrationSchema'])->name('workflows.migration-schema');
+    Route::post('/workflows/{workflow}/migrate-instances', [\App\Http\Controllers\WorkflowController::class, 'migrateInstances'])->name('workflows.migrate-instances');
+    Route::resource('workflows', \App\Http\Controllers\WorkflowController::class)->except(['index']);
+
+    // Süreç Kataloğu Hızlı CRUD İşlemleri (/processes sayfasından tam yönetim)
+    Route::post('/processes/workflows', [\App\Http\Controllers\WorkflowController::class, 'quickStore'])->name('processes.workflows.store');
+    Route::patch('/processes/workflows/{workflow}', [\App\Http\Controllers\WorkflowController::class, 'quickUpdate'])->name('processes.workflows.update');
+    Route::post('/processes/workflows/{workflow}/toggle-status', [\App\Http\Controllers\WorkflowController::class, 'toggleStatus'])->name('processes.workflows.toggle-status');
+    Route::delete('/processes/workflows/{workflow}', [\App\Http\Controllers\WorkflowController::class, 'destroy'])->name('processes.workflows.destroy');
+    Route::post('/processes/workflows/{id}/restore', [\App\Http\Controllers\WorkflowController::class, 'restore'])->name('processes.workflows.restore');
 
     // Süreç Başlatma (Sadece 'start_processes' yetkisi olanlar)
     Route::middleware('can:start_processes')->group(function () {

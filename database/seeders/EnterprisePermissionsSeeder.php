@@ -59,6 +59,11 @@ class EnterprisePermissionsSeeder extends Seeder
             'tasks.admin_edit',
             'tasks.admin_delete',
             'tasks.admin_bulk_delete',
+
+            // 9. İş Akışı & Süreç Kataloğu CRUD Yetkileri
+            'workflows.create',
+            'workflows.edit',
+            'workflows.delete',
         ];
 
         foreach ($permissions as $p) {

@@ -26,6 +26,28 @@ class WorkflowController extends Controller
     ) {
     }
 
+    /**
+     * İş akışı işlem yetkisini Spatie izinleri ve kurumsal roller üzerinden denetler.
+     */
+    public function authorizeAction(string $permission): void
+    {
+        $user = auth()->user();
+        if (!$user) {
+            abort(401, 'Giriş yapmanız gerekmektedir.');
+        }
+
+        if (
+            $user->hasRole('Admin') ||
+            $user->hasRole('superadmin') ||
+            $user->can('manage_workflows') ||
+            $user->can($permission)
+        ) {
+            return;
+        }
+
+        abort(403, 'Bu işlem için yetkiniz bulunmamaktadır.');
+    }
+
     public function index()
     {
         $user = auth()->user();
@@ -89,6 +111,8 @@ class WorkflowController extends Controller
 
     public function create()
     {
+        $this->authorizeAction('workflows.create');
+
         $forms = FormTemplate::where('is_active', true)->get();
         $users = User::select('id', 'name', 'email', 'department_id', 'title')->get();
         $departments = Department::with(['allManagers' => function($q) {
@@ -110,6 +134,8 @@ class WorkflowController extends Controller
 
     public function store(Request $request)
     {
+        $this->authorizeAction('workflows.create');
+
         $validated = $this->validatedWorkflowPayload($request);
 
         $workflow = Workflow::create([
@@ -131,8 +157,107 @@ class WorkflowController extends Controller
         return $this->redirectAfterSave($workflow, $validated, $request);
     }
 
+    /**
+     * Süreç Kataloğu üzerinden hızlı yeni iş akışı oluşturma
+     */
+    public function quickStore(Request $request)
+    {
+        $this->authorizeAction('workflows.create');
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'category' => 'nullable|string|max:100',
+            'form_template_id' => 'nullable|exists:form_templates,id',
+            'status' => 'required|in:active,draft',
+        ]);
+
+        $categoryArray = !empty($validated['category']) ? [$validated['category']] : [];
+
+        $initialNodes = [
+            [
+                'id' => 'node_start',
+                'type' => 'start',
+                'label' => 'Başlangıç',
+                'position' => ['x' => 150, 'y' => 200],
+                'data' => [
+                    'label' => 'Talep Başlangıcı',
+                    'nodeType' => 'start',
+                ],
+            ],
+            [
+                'id' => 'node_end',
+                'type' => 'end',
+                'label' => 'Tamamlandı',
+                'position' => ['x' => 600, 'y' => 200],
+                'data' => [
+                    'label' => 'Süreç Tamamlandı',
+                    'nodeType' => 'end',
+                ],
+            ],
+        ];
+
+        $initialEdges = [
+            [
+                'id' => 'edge_start_to_end',
+                'source' => 'node_start',
+                'target' => 'node_end',
+            ],
+        ];
+
+        $workflow = Workflow::create([
+            'name' => $validated['name'],
+            'description' => $validated['description'] ?? null,
+            'category' => $categoryArray,
+            'form_template_id' => $validated['form_template_id'] ?? null,
+            'nodes' => $initialNodes,
+            'edges' => $initialEdges,
+            'status' => $validated['status'],
+            'created_by' => auth()->id(),
+            'version' => 1,
+            'is_latest' => true,
+        ]);
+
+        if ($request->boolean('open_designer')) {
+            return redirect()->route('workflows.edit', $workflow->id)
+                ->with('success', "'{$workflow->name}' adlı yeni süreç oluşturuldu. Akış diyagramını tasarlayabilirsiniz.");
+        }
+
+        return redirect()->back()->with('success', "'{$workflow->name}' adlı iş akış şablonu başarıyla oluşturuldu.");
+    }
+
+    /**
+     * Süreç Kataloğu üzerinden hızlı iş akışı düzenleme
+     */
+    public function quickUpdate(Request $request, Workflow $workflow)
+    {
+        $this->authorizeAction('workflows.edit');
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'category' => 'nullable|string|max:100',
+            'form_template_id' => 'nullable|exists:form_templates,id',
+            'status' => 'required|in:active,draft',
+        ]);
+
+        $categoryArray = !empty($validated['category']) ? [$validated['category']] : [];
+
+        $workflow->update([
+            'name' => $validated['name'],
+            'description' => $validated['description'] ?? null,
+            'category' => $categoryArray,
+            'form_template_id' => $validated['form_template_id'] ?? null,
+            'status' => $validated['status'],
+        ]);
+
+        return redirect()->back()->with('success', "'{$workflow->name}' iş akışı bilgileri başarıyla güncellendi.");
+    }
+
     public function edit(Workflow $workflow)
     {
+        $this->authorizeAction('workflows.edit');
+
         $forms = FormTemplate::where('is_active', true)->get();
         $users = User::select('id', 'name', 'email', 'department_id', 'title')->get();
         $departments = Department::with(['allManagers' => function($q) {
@@ -166,6 +291,8 @@ class WorkflowController extends Controller
 
     public function update(Request $request, Workflow $workflow)
     {
+        $this->authorizeAction('workflows.edit');
+
         $validated = $this->validatedWorkflowPayload($request);
 
         $workflow->update($validated);
@@ -175,23 +302,40 @@ class WorkflowController extends Controller
 
     public function destroy(Workflow $workflow)
     {
+        $this->authorizeAction('workflows.delete');
+
         // 1. Devam eden canlı talep kontrolü
         $activeInstancesCount = $workflow->processInstances()
             ->whereIn('status', ['running', 'waiting'])
             ->count();
 
         if ($activeInstancesCount > 0) {
-            return redirect()->back()->with('error', "Bu akış şablonuna bağlı yürüyen {$activeInstancesCount} adet canlı talep bulunmaktadır. Süreçler tamamlanmadan şablon silinemez. Dilerseniz şablonu 'Taslak' veya 'Arşivli' durumuna alabilirsiniz.");
+            return redirect()->back()->with('error', "Bu akış şablonuna bağlı yürüyen {$activeInstancesCount} adet canlı talep bulunmaktadır. Süreçler tamamlanmadan şablon silinemez. Dilerseniz şablonu 'Taslak' durumuna alabilirsiniz.");
         }
 
         $name = $workflow->name;
         $workflow->delete();
 
-        return redirect()->route('workflows.index')->with('success', "'{$name}' adlı iş akış şablonu başarıyla silindi.");
+        return redirect()->back()->with('success', "'{$name}' adlı iş akış şablonu başarıyla silindi (Soft Delete).");
+    }
+
+    /**
+     * Soft delete ile silinmiş bir akışı geri yükler.
+     */
+    public function restore(int $id)
+    {
+        $this->authorizeAction('workflows.delete');
+
+        $workflow = Workflow::onlyTrashed()->findOrFail($id);
+        $workflow->restore();
+
+        return redirect()->back()->with('success', "'{$workflow->name}' adlı iş akış şablonu başarıyla geri yüklendi.");
     }
 
     public function toggleStatus(Workflow $workflow)
     {
+        $this->authorizeAction('workflows.edit');
+
         $newStatus = $workflow->status === 'active' ? 'draft' : 'active';
         $workflow->update(['status' => $newStatus]);
 
@@ -201,6 +345,8 @@ class WorkflowController extends Controller
 
     public function duplicate(Workflow $workflow)
     {
+        $this->authorizeAction('workflows.create');
+
         $clone = $workflow->replicate();
         $clone->name = $workflow->name . ' (Kopya)';
         $clone->status = 'draft';

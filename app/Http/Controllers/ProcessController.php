@@ -17,40 +17,90 @@ use App\Services\TerminSlaService;
 
 class ProcessController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
         /** @var User $user */
         $user = Auth::user();
-        $userDeptId = (string) $user->department_id;
-        $userRoleIds = $user->roles->pluck('id')->map(fn($id) => (string) $id)->toArray();
-        $userId = (string) $user->id;
 
-        // Başlatılabilecek akışlar
-        $workflows = Workflow::where('status', 'active')
-            ->where(function ($q) {
-                $q->whereNull('valid_from')->orWhere('valid_from', '<=', now()->toDateString());
-            })
-            ->where(function ($q) {
-                $q->whereNull('valid_until')->orWhere('valid_until', '>=', now()->toDateString());
-            })
-            ->with('formTemplate')
-            ->get();
+        $isSuperAdmin = $user->hasRole('Admin') || $user->hasRole('superadmin');
+        $canManage = $isSuperAdmin || $user->can('manage_workflows');
+        $canCreate = $canManage || $user->can('workflows.create');
+        $canEdit   = $canManage || $user->can('workflows.edit');
+        $canDelete = $canManage || $user->can('workflows.delete');
+        $isWorkflowManager = $canManage || $canEdit || $canDelete || $canCreate;
 
-        // Departman, Rol ve Kullanıcı Yetkisi Filtresi
-        $filteredWorkflows = $workflows->filter(function ($workflow) use ($user) {
-            return $this->userCanStartWorkflow($user, $workflow);
-        });
+        $showTrashed = $request->boolean('show_trashed') && $canDelete;
+
+        if ($isWorkflowManager) {
+            $query = Workflow::with('formTemplate')
+                ->withCount([
+                    'processInstances as active_instances_count' => function ($q) {
+                        $q->whereIn('status', ['running', 'waiting']);
+                    },
+                    'processInstances as total_instances_count'
+                ])
+                ->latest();
+
+            if ($showTrashed) {
+                $query->onlyTrashed();
+            }
+
+            $workflows = $query->get()->map(function ($workflow) use ($user) {
+                $workflow->can_start = $workflow->status === 'active' && $this->userCanStartWorkflow($user, $workflow);
+                return $workflow;
+            });
+        } else {
+            // Standart kullanıcılar sadece kendi departman/rolüne açık AKTİF akışları görür
+            $workflows = Workflow::where('status', 'active')
+                ->where(function ($q) {
+                    $q->whereNull('valid_from')->orWhere('valid_from', '<=', now()->toDateString());
+                })
+                ->where(function ($q) {
+                    $q->whereNull('valid_until')->orWhere('valid_until', '>=', now()->toDateString());
+                })
+                ->with('formTemplate')
+                ->get()
+                ->filter(function ($workflow) use ($user) {
+                    return $this->userCanStartWorkflow($user, $workflow);
+                })
+                ->map(function ($workflow) {
+                    $workflow->can_start = true;
+                    return $workflow;
+                });
+        }
 
         // Kategorilere göre grupla
-        $grouped = $filteredWorkflows->groupBy(function ($item) {
+        $grouped = $workflows->groupBy(function ($item) {
             if (is_array($item->category)) {
                 return !empty($item->category[0]) ? (string) $item->category[0] : 'Diğer Formlar';
             }
             return $item->category ? (string) $item->category : 'Diğer Formlar';
         });
 
+        // Form şablonları (Yeni akış açma ve düzenleme için)
+        $formTemplates = $isWorkflowManager
+            ? \App\Models\FormTemplate::where('is_active', true)->select('id', 'name', 'document_no')->orderBy('name')->get()
+            : [];
+
+        // Mevcut kategoriler listesi
+        $allCategories = Workflow::withTrashed()->pluck('category')
+            ->flatMap(fn($cat) => is_array($cat) ? $cat : (is_string($cat) ? (json_decode($cat, true) ?: [$cat]) : []))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
         return Inertia::render('Process/Index', [
-            'groupedWorkflows' => $grouped
+            'groupedWorkflows' => $grouped,
+            'authPermissions' => [
+                'canCreate' => $canCreate,
+                'canEdit'   => $canEdit,
+                'canDelete' => $canDelete,
+                'canManage' => $canManage,
+            ],
+            'formTemplates' => $formTemplates,
+            'allCategories' => $allCategories,
+            'isShowingTrashed' => $showTrashed,
         ]);
     }
 
