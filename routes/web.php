@@ -106,8 +106,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/tasks', [\App\Http\Controllers\TaskController::class, 'index'])->name('tasks.index');
     Route::post('/tasks/bulk-action', [\App\Http\Controllers\TaskController::class, 'bulkAction'])->name('tasks.bulk-action');
     Route::post('/tasks/admin-bulk-destroy', [\App\Http\Controllers\TaskController::class, 'adminBulkDestroy'])
-        ->name('tasks.admin-bulk-destroy')
-        ->middleware('can:tasks.admin_bulk_delete');
+        ->name('tasks.admin-bulk-destroy');
 
     Route::get('/tasks/{task}', [\App\Http\Controllers\TaskController::class, 'show'])->name('tasks.show')->whereNumber('task');
     Route::post('/tasks/{task}', [\App\Http\Controllers\TaskController::class, 'update'])->name('tasks.update')->whereNumber('task');
@@ -121,12 +120,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Yönetici Görev & Test Süreç Yönetimi (Admin Soft Delete & Edit)
     Route::put('/tasks/{task}/admin-update', [\App\Http\Controllers\TaskController::class, 'adminUpdate'])
         ->name('tasks.admin-update')
-        ->whereNumber('task')
-        ->middleware('can:tasks.admin_edit');
+        ->whereNumber('task');
     Route::delete('/tasks/{task}/admin-destroy', [\App\Http\Controllers\TaskController::class, 'adminDestroy'])
         ->name('tasks.admin-destroy')
-        ->whereNumber('task')
-        ->middleware('can:tasks.admin_delete');
+        ->whereNumber('task');
 
     // Vekalet Rotaları
     Route::post('/delegations', [\App\Http\Controllers\DelegationController::class, 'store'])->name('delegations.store');
