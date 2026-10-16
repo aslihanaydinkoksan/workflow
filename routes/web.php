@@ -105,24 +105,28 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Görevlerim (Tüm kullanıcılar kendi görevlerini görebilmeli)
     Route::get('/tasks', [\App\Http\Controllers\TaskController::class, 'index'])->name('tasks.index');
     Route::post('/tasks/bulk-action', [\App\Http\Controllers\TaskController::class, 'bulkAction'])->name('tasks.bulk-action');
-    Route::get('/tasks/{task}', [\App\Http\Controllers\TaskController::class, 'show'])->name('tasks.show');
-    Route::post('/tasks/{task}', [\App\Http\Controllers\TaskController::class, 'update'])->name('tasks.update');
-    Route::post('/tasks/{task}/undo', [\App\Http\Controllers\TaskController::class, 'undo'])->name('tasks.undo');
+    Route::post('/tasks/admin-bulk-destroy', [\App\Http\Controllers\TaskController::class, 'adminBulkDestroy'])
+        ->name('tasks.admin-bulk-destroy')
+        ->middleware('can:tasks.admin_bulk_delete');
+
+    Route::get('/tasks/{task}', [\App\Http\Controllers\TaskController::class, 'show'])->name('tasks.show')->whereNumber('task');
+    Route::post('/tasks/{task}', [\App\Http\Controllers\TaskController::class, 'update'])->name('tasks.update')->whereNumber('task');
+    Route::post('/tasks/{task}/undo', [\App\Http\Controllers\TaskController::class, 'undo'])->name('tasks.undo')->whereNumber('task');
+    
     // YENİ EKLENEN DIŞA AKTARIM (EXPORT) ROTALARI
-    Route::get('/tasks/{task}/export/pdf', [\App\Http\Controllers\TaskController::class, 'exportPdf'])->name('tasks.export.pdf');
-    Route::get('/tasks/{task}/export/excel', [\App\Http\Controllers\TaskController::class, 'exportExcel'])->name('tasks.export.excel');
-    Route::get('/tasks/{task}/export/certificate', [\App\Http\Controllers\TaskController::class, 'exportCertificate'])->name('tasks.export.certificate');
+    Route::get('/tasks/{task}/export/pdf', [\App\Http\Controllers\TaskController::class, 'exportPdf'])->name('tasks.export.pdf')->whereNumber('task');
+    Route::get('/tasks/{task}/export/excel', [\App\Http\Controllers\TaskController::class, 'exportExcel'])->name('tasks.export.excel')->whereNumber('task');
+    Route::get('/tasks/{task}/export/certificate', [\App\Http\Controllers\TaskController::class, 'exportCertificate'])->name('tasks.export.certificate')->whereNumber('task');
 
     // Yönetici Görev & Test Süreç Yönetimi (Admin Soft Delete & Edit)
     Route::put('/tasks/{task}/admin-update', [\App\Http\Controllers\TaskController::class, 'adminUpdate'])
         ->name('tasks.admin-update')
+        ->whereNumber('task')
         ->middleware('can:tasks.admin_edit');
     Route::delete('/tasks/{task}/admin-destroy', [\App\Http\Controllers\TaskController::class, 'adminDestroy'])
         ->name('tasks.admin-destroy')
+        ->whereNumber('task')
         ->middleware('can:tasks.admin_delete');
-    Route::post('/tasks/admin-bulk-destroy', [\App\Http\Controllers\TaskController::class, 'adminBulkDestroy'])
-        ->name('tasks.admin-bulk-destroy')
-        ->middleware('can:tasks.admin_bulk_delete');
 
     // Vekalet Rotaları
     Route::post('/delegations', [\App\Http\Controllers\DelegationController::class, 'store'])->name('delegations.store');
