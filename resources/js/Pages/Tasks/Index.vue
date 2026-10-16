@@ -10,6 +10,25 @@ const isAdmin = computed(() => {
     return roles.includes('Admin') || roles.includes('superadmin') || roles.some(r => r === 'Admin' || r.name === 'Admin');
 });
 
+// RBAC İzin Kontrolleri (Spatie Yetki Matrisi /admin/roles üzerinden)
+const canAdminEdit = computed(() => {
+    const perms = page.props.auth?.permissions || [];
+    const roles = user.value?.roles || [];
+    return roles.includes('Admin') || roles.includes('superadmin') || perms.includes('tasks.admin_edit');
+});
+
+const canAdminDelete = computed(() => {
+    const perms = page.props.auth?.permissions || [];
+    const roles = user.value?.roles || [];
+    return roles.includes('Admin') || roles.includes('superadmin') || perms.includes('tasks.admin_delete');
+});
+
+const canAdminBulkDelete = computed(() => {
+    const perms = page.props.auth?.permissions || [];
+    const roles = user.value?.roles || [];
+    return roles.includes('Admin') || roles.includes('superadmin') || perms.includes('tasks.admin_bulk_delete') || perms.includes('tasks.admin_delete');
+});
+
 // Admin Hızlı Kapsam Filtresi: 'assigned_to_me' (Bana Atananlar) veya 'all' (Tüm Şirket Havuzu)
 const adminTaskScope = ref('all');
 
@@ -30,6 +49,10 @@ const props = defineProps({
     tasks: Array,
     completedTasks: Array,
     users: Array,
+    all_users: {
+        type: Array,
+        default: () => [],
+    },
     given_delegations: Array,
     received_delegations: Array,
     pending_follow_ups: {
@@ -46,6 +69,7 @@ const props = defineProps({
     },
 });
 
+
 const activeTab = ref('pending'); // 'pending' or 'completed'
 const isDelegationPanelOpen = ref(false);
 
@@ -58,6 +82,171 @@ const delegationForm = useForm({
     scope_value: '',
     reason: '',
 });
+
+// Çoklu Seçim & Toplu Karar (Bulk Approve / Reject - SAP MyInbox Standardı)
+const selectedTaskIds = ref([]);
+const isBulkModalOpen = ref(false);
+const bulkActionType = ref('approve'); // 'approve' | 'reject'
+const bulkComment = ref('');
+const isBulkSubmitting = ref(false);
+
+const eligibleSelectTasks = computed(() => {
+    if (canAdminBulkDelete.value) {
+        return filteredPendingTasks.value;
+    }
+    return filteredPendingTasks.value.filter(t => t.type === 'approval');
+});
+
+const isAllSelected = computed(() => {
+    return eligibleSelectTasks.value.length > 0 &&
+        eligibleSelectTasks.value.every(t => selectedTaskIds.value.includes(t.id));
+});
+
+const toggleSelectAll = () => {
+    if (isAllSelected.value) {
+        selectedTaskIds.value = [];
+    } else {
+        selectedTaskIds.value = eligibleSelectTasks.value.map(t => t.id);
+    }
+};
+
+const toggleTaskSelection = (taskId) => {
+    const idx = selectedTaskIds.value.indexOf(taskId);
+    if (idx > -1) {
+        selectedTaskIds.value.splice(idx, 1);
+    } else {
+        selectedTaskIds.value.push(taskId);
+    }
+};
+
+// Admin Tekil Düzenleme Modalı
+const isEditModalOpen = ref(false);
+const selectedTaskForEdit = ref(null);
+const isEditSubmitting = ref(false);
+const editForm = useForm({
+    assigned_to: '',
+    due_date: '',
+    status: 'pending',
+    comment: '',
+});
+
+const openEditModal = (task) => {
+    selectedTaskForEdit.value = task;
+    let formattedDue = '';
+    if (task.due_date) {
+        const d = new Date(task.due_date);
+        // yyyy-MM-ddThh:mm formatı datetime-local için
+        const pad = (n) => String(n).padStart(2, '0');
+        formattedDue = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    editForm.assigned_to = task.assigned_to || '';
+    editForm.due_date = formattedDue;
+    editForm.status = task.status || 'pending';
+    editForm.comment = '';
+    isEditModalOpen.value = true;
+};
+
+const submitEdit = () => {
+    if (!selectedTaskForEdit.value) return;
+    isEditSubmitting.value = true;
+    editForm.put(route('tasks.admin-update', selectedTaskForEdit.value.id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            isEditModalOpen.value = false;
+            selectedTaskForEdit.value = null;
+            isEditSubmitting.value = false;
+        },
+        onError: () => {
+            isEditSubmitting.value = false;
+        }
+    });
+};
+
+// Admin Tekil Silme Modalı (Soft Delete)
+const isDeleteModalOpen = ref(false);
+const selectedTaskForDelete = ref(null);
+const isDeleteSubmitting = ref(false);
+const deleteForm = useForm({
+    delete_scope: 'process', // 'process' | 'task'
+});
+
+const openDeleteModal = (task) => {
+    selectedTaskForDelete.value = task;
+    deleteForm.delete_scope = 'process';
+    isDeleteModalOpen.value = true;
+};
+
+const submitDelete = () => {
+    if (!selectedTaskForDelete.value) return;
+    isDeleteSubmitting.value = true;
+    deleteForm.delete(route('tasks.admin-destroy', selectedTaskForDelete.value.id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            isDeleteModalOpen.value = false;
+            selectedTaskForDelete.value = null;
+            isDeleteSubmitting.value = false;
+        },
+        onError: () => {
+            isDeleteSubmitting.value = false;
+        }
+    });
+};
+
+// Admin Toplu Silme Modalı (Bulk Soft Delete)
+const isBulkDeleteModalOpen = ref(false);
+const isBulkDeleteSubmitting = ref(false);
+const bulkDeleteForm = useForm({
+    task_ids: [],
+    delete_scope: 'process', // 'process' | 'task'
+});
+
+const openBulkDeleteModal = () => {
+    bulkDeleteForm.task_ids = [...selectedTaskIds.value];
+    bulkDeleteForm.delete_scope = 'process';
+    isBulkDeleteModalOpen.value = true;
+};
+
+const submitBulkDelete = () => {
+    if (bulkDeleteForm.task_ids.length === 0) return;
+    isBulkDeleteSubmitting.value = true;
+    bulkDeleteForm.post(route('tasks.admin-bulk-destroy'), {
+        preserveScroll: true,
+        onSuccess: () => {
+            isBulkDeleteModalOpen.value = false;
+            selectedTaskIds.value = [];
+            isBulkDeleteSubmitting.value = false;
+        },
+        onError: () => {
+            isBulkDeleteSubmitting.value = false;
+        }
+    });
+};
+
+const openBulkModal = (type) => {
+    bulkActionType.value = type;
+    bulkComment.value = '';
+    isBulkModalOpen.value = true;
+};
+
+
+const submitBulkAction = () => {
+    if (selectedTaskIds.value.length === 0) return;
+    isBulkSubmitting.value = true;
+    useForm({
+        task_ids: selectedTaskIds.value,
+        action: bulkActionType.value,
+        comment: bulkComment.value,
+    }).post(route('tasks.bulk-action'), {
+        onSuccess: () => {
+            selectedTaskIds.value = [];
+            isBulkModalOpen.value = false;
+            isBulkSubmitting.value = false;
+        },
+        onError: () => {
+            isBulkSubmitting.value = false;
+        }
+    });
+};
 
 // Arama Kutusu (Kullanıcı Filtreleme)
 const searchQuery = ref('');
@@ -278,6 +467,17 @@ const getDueInfo = (task) => {
                                 <table class="min-w-full divide-y divide-gray-200">
                                     <thead class="bg-gray-50">
                                         <tr>
+                                            <th scope="col" class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-10">
+                                                <input 
+                                                    v-if="eligibleSelectTasks.length > 0"
+                                                    type="checkbox" 
+                                                    :checked="isAllSelected" 
+                                                    @change="toggleSelectAll" 
+                                                    class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                                                    title="Tüm Görevleri Seç / Kaldır"
+                                                />
+
+                                            </th>
                                             <th scope="col"
                                                 class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                 Görev No</th>
@@ -299,7 +499,18 @@ const getDueInfo = (task) => {
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200">
-                                        <tr v-for="task in filteredPendingTasks" :key="task.id" class="hover:bg-gray-50">
+                                        <tr v-for="task in filteredPendingTasks" :key="task.id" :class="[selectedTaskIds.includes(task.id) ? 'bg-indigo-50/70' : 'hover:bg-gray-50']">
+                                            <td class="px-4 py-4 whitespace-nowrap text-center text-sm">
+                                                <input 
+                                                    v-if="task.type === 'approval' || canAdminBulkDelete"
+                                                    type="checkbox" 
+                                                    :checked="selectedTaskIds.includes(task.id)" 
+                                                    @change="toggleTaskSelection(task.id)"
+                                                    class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                                                />
+
+                                                <span v-else class="text-gray-300 text-xs">-</span>
+                                            </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">#{{ task.id }}
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap">
@@ -341,25 +552,346 @@ const getDueInfo = (task) => {
                                                 {{ new Date(task.created_at).toLocaleString() }}
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                <Link :href="route('tasks.show', task.id)"
-                                                    :class="[
-                                                        'inline-flex items-center px-3.5 py-1.5 rounded-md transition-colors font-bold text-xs gap-1',
-                                                        isRevisionTask(task)
-                                                            ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-sm'
-                                                            : 'text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100'
-                                                    ]">
-                                                    <span>{{ isRevisionTask(task) ? '✏️ Revize Et' : 'Göreve Git' }}</span>
-                                                    <span>&rarr;</span>
-                                                </Link>
+                                                <div class="flex items-center justify-end gap-1.5">
+                                                    <Link :href="route('tasks.show', task.id)"
+                                                        :class="[
+                                                            'inline-flex items-center px-3.5 py-1.5 rounded-md transition-colors font-bold text-xs gap-1',
+                                                            isRevisionTask(task)
+                                                                ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-sm'
+                                                                : 'text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100'
+                                                        ]">
+                                                        <span>{{ isRevisionTask(task) ? '✏️ Revize Et' : 'Göreve Git' }}</span>
+                                                        <span>&rarr;</span>
+                                                    </Link>
+                                                    <button 
+                                                        v-if="canAdminEdit"
+                                                        type="button"
+                                                        @click="openEditModal(task)"
+                                                        class="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                                                        title="Görevi Düzenle (Admin)"
+                                                    >
+                                                        ✏️
+                                                    </button>
+                                                    <button 
+                                                        v-if="canAdminDelete"
+                                                        type="button"
+                                                        @click="openDeleteModal(task)"
+                                                        class="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                                                        title="Görevi / Süreci Sil (Soft Delete)"
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     </tbody>
                                 </table>
                             </div>
+
+                            <!-- Toplu Karar Merkezi (Floating Action Bar - SAP MyInbox) -->
+                            <div v-if="selectedTaskIds.length > 0" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md text-white px-6 py-3.5 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-in fade-in slide-in-from-bottom duration-300">
+                                <div class="flex items-center gap-2">
+                                    <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-black">
+                                        {{ selectedTaskIds.length }}
+                                    </span>
+                                    <span class="text-xs font-bold text-slate-200">Onay Görevi Seçildi</span>
+                                </div>
+                                <div class="h-5 w-px bg-slate-700"></div>
+                                <button 
+                                    type="button" 
+                                    @click="openBulkModal('approve')" 
+                                    class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+                                >
+                                    <span>✅</span>
+                                    <span>Toplu Onayla</span>
+                                </button>
+                                <button 
+                                    type="button" 
+                                    @click="openBulkModal('reject')" 
+                                    class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+                                >
+                                    <span>❌</span>
+                                    <span>Toplu Reddet</span>
+                                </button>
+                                <button 
+                                    v-if="canAdminBulkDelete"
+                                    type="button" 
+                                    @click="openBulkDeleteModal" 
+                                    class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+                                >
+                                    <span>🗑️</span>
+                                    <span>Toplu Sil (Soft Delete)</span>
+                                </button>
+
+                                <button 
+                                    type="button" 
+                                    @click="selectedTaskIds = []" 
+                                    class="text-xs text-slate-400 hover:text-white underline ml-1 cursor-pointer"
+                                >
+                                    Vazgeç
+                                </button>
+                            </div>
+
+                            <!-- Toplu Karar Onay Modalı -->
+                            <div v-if="isBulkModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+                                <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100">
+                                    <div class="flex items-center gap-3 mb-4">
+                                        <div :class="['w-10 h-10 rounded-xl flex items-center justify-center text-lg', bulkActionType === 'approve' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700']">
+                                            {{ bulkActionType === 'approve' ? '✅' : '❌' }}
+                                        </div>
+                                        <div>
+                                            <h3 class="font-bold text-gray-900 text-base">
+                                                {{ bulkActionType === 'approve' ? 'Toplu Onaylama Kararı' : 'Toplu Ret Kararı' }}
+                                            </h3>
+                                            <p class="text-xs text-gray-500">
+                                                Seçilen {{ selectedTaskIds.length }} adet görev tek seferde işlenecektir.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div class="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-1">
+                                        <div class="flex justify-between">
+                                            <span class="text-slate-500">Seçilen Görevler:</span>
+                                            <span class="font-bold">#{{ selectedTaskIds.join(', #') }}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-slate-500">Yetkili / Onaylayan:</span>
+                                            <span class="font-bold">{{ user.name }}</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="mb-5">
+                                        <label class="block text-xs font-bold text-gray-700 mb-1.5">
+                                            Toplu Karar Notu (Opsiyonel):
+                                        </label>
+                                        <textarea 
+                                            v-model="bulkComment" 
+                                            rows="2" 
+                                            class="w-full text-xs rounded-xl border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                                            :placeholder="bulkActionType === 'approve' ? 'Talepler incelendi ve toplu onaylandı...' : 'Toplu ret gerekçesi...'"
+                                        ></textarea>
+                                    </div>
+
+                                    <div class="flex justify-end gap-2.5">
+                                        <button 
+                                            type="button" 
+                                            @click="isBulkModalOpen = false" 
+                                            class="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl"
+                                        >
+                                            İptal
+                                        </button>
+                                        <button 
+                                            type="button" 
+                                            @click="submitBulkAction" 
+                                            :disabled="isBulkSubmitting"
+                                            :class="['px-5 py-2 text-xs font-bold text-white rounded-xl shadow-md transition flex items-center gap-1.5', bulkActionType === 'approve' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-rose-600 hover:bg-rose-500', isBulkSubmitting ? 'opacity-50' : '']"
+                                        >
+                                            <span v-if="isBulkSubmitting">İşleniyor...</span>
+                                            <span v-else>{{ bulkActionType === 'approve' ? '🚀 Topluca Onayla' : '🛑 Topluca Reddet' }}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Admin Görev Düzenleme Modalı -->
+                            <div v-if="isEditModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+                                <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-100 animate-in fade-in duration-200">
+                                    <div class="flex items-center justify-between pb-3 border-b border-gray-100 mb-4">
+                                        <div class="flex items-center gap-2.5">
+                                            <span class="text-xl">✏️</span>
+                                            <div>
+                                                <h3 class="text-sm font-bold text-gray-900">Görev Yönetici Düzenleme</h3>
+                                                <p class="text-xs text-gray-500">Görev No: #{{ selectedTaskForEdit?.id }} · Süreç: {{ selectedTaskForEdit?.process_instance?.workflow?.name }}</p>
+                                            </div>
+                                        </div>
+                                        <button @click="isEditModalOpen = false" class="text-gray-400 hover:text-gray-600 text-lg">&times;</button>
+                                    </div>
+
+                                    <form @submit.prevent="submitEdit" class="space-y-4">
+                                        <div>
+                                            <label class="block text-xs font-bold text-gray-700 mb-1">Atanan Personel / Yetkili:</label>
+                                            <select 
+                                                v-model="editForm.assigned_to" 
+                                                class="w-full text-xs rounded-xl border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                                            >
+                                                <option value="">Atama Yapılmadı / Havuzda</option>
+                                                <option v-for="u in (props.all_users && props.all_users.length > 0 ? props.all_users : props.users)" :key="u.id" :value="u.id">
+                                                    {{ u.name }} (ID: {{ u.id }})
+                                                </option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label class="block text-xs font-bold text-gray-700 mb-1">Son Teslim Tarihi / Vade (Due Date):</label>
+                                            <input 
+                                                type="datetime-local" 
+                                                v-model="editForm.due_date"
+                                                class="w-full text-xs rounded-xl border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label class="block text-xs font-bold text-gray-700 mb-1">Görev Durumu:</label>
+                                            <select 
+                                                v-model="editForm.status" 
+                                                class="w-full text-xs rounded-xl border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                                            >
+                                                <option value="pending">Bekliyor (pending)</option>
+                                                <option value="completed">Tamamlandı (completed)</option>
+                                                <option value="cancelled">İptal Edildi (cancelled)</option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label class="block text-xs font-bold text-gray-700 mb-1">Yönetici Notu / Gerekçe (İsteğe Bağlı):</label>
+                                            <textarea 
+                                                v-model="editForm.comment" 
+                                                rows="2" 
+                                                class="w-full text-xs rounded-xl border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                                                placeholder="Müdahale gerekçesi, audit günlüğüne işlenecektir..."
+                                            ></textarea>
+                                        </div>
+
+                                        <div class="flex justify-end gap-2.5 pt-3 border-t border-gray-100">
+                                            <button 
+                                                type="button" 
+                                                @click="isEditModalOpen = false" 
+                                                class="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl"
+                                            >
+                                                Vazgeç
+                                            </button>
+                                            <button 
+                                                type="submit" 
+                                                :disabled="isEditSubmitting"
+                                                class="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-md transition disabled:opacity-50"
+                                            >
+                                                <span v-if="isEditSubmitting">Kaydediliyor...</span>
+                                                <span v-else>💾 Değişiklikleri Kaydet</span>
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <!-- Admin Görev / Süreç Silme Modalı (Soft Delete) -->
+                            <div v-if="isDeleteModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+                                <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 animate-in fade-in duration-200">
+                                    <div class="flex items-center gap-3 mb-3">
+                                        <div class="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl shrink-0 font-bold">
+                                            🗑️
+                                        </div>
+                                        <div>
+                                            <h3 class="text-sm font-bold text-gray-900">Görevi / Süreci Sil (Soft Delete)</h3>
+                                            <p class="text-xs text-gray-500">Görev No: #{{ selectedTaskForDelete?.id }} · Talep No: #{{ selectedTaskForDelete?.process_instance_id }}</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="p-3 bg-amber-50/80 rounded-xl border border-amber-200 text-[11px] text-amber-800 mb-4 leading-relaxed">
+                                        🛡️ <strong>Güvenli Soft Delete:</strong> Bu kayıtlar veritabanından kalıcı olarak yok edilmez. <code>deleted_at</code> damgası ile güvenle arşivlenir. Gerekirse sistem yöneticisi tarafından kurtarılabilir.
+                                    </div>
+
+                                    <div class="space-y-2.5 mb-5">
+                                        <label class="block text-xs font-bold text-gray-700 mb-1">Silme Kapsamını Seçin:</label>
+                                        
+                                        <label :class="['flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition', deleteForm.delete_scope === 'process' ? 'border-rose-300 bg-rose-50/50' : 'border-gray-200 hover:bg-gray-50']">
+                                            <input type="radio" value="process" v-model="deleteForm.delete_scope" class="mt-0.5 text-rose-600 focus:ring-rose-500" />
+                                            <div>
+                                                <div class="text-xs font-bold text-gray-900">🚀 Bağlı Test Sürecini ve Tüm Görevlerini Arşivle</div>
+                                                <div class="text-[11px] text-gray-500">Süreci (#{{ selectedTaskForDelete?.process_instance_id }}) ve ona ait bekleyen tüm görevleri temizler (Önerilen).</div>
+                                            </div>
+                                        </label>
+
+                                        <label :class="['flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition', deleteForm.delete_scope === 'task' ? 'border-rose-300 bg-rose-50/50' : 'border-gray-200 hover:bg-gray-50']">
+                                            <input type="radio" value="task" v-model="deleteForm.delete_scope" class="mt-0.5 text-rose-600 focus:ring-rose-500" />
+                                            <div>
+                                                <div class="text-xs font-bold text-gray-900">📋 Yalnızca Bu Tekil Görevi Arşivle</div>
+                                                <div class="text-[11px] text-gray-500">Süreç açık kalmaya devam eder, yalnızca bu personelin görevi soft delete yapılır.</div>
+                                            </div>
+                                        </label>
+                                    </div>
+
+                                    <div class="flex justify-end gap-2.5 pt-3 border-t border-gray-100">
+                                        <button 
+                                            type="button" 
+                                            @click="isDeleteModalOpen = false" 
+                                            class="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl"
+                                        >
+                                            Vazgeç
+                                        </button>
+                                        <button 
+                                            type="button" 
+                                            @click="submitDelete"
+                                            :disabled="isDeleteSubmitting"
+                                            class="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 rounded-xl shadow-md transition disabled:opacity-50"
+                                        >
+                                            <span v-if="isDeleteSubmitting">Siliniyor...</span>
+                                            <span v-else>🗑️ Güvenle Sil (Soft Delete)</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Admin Toplu Silme Modalı (Bulk Soft Delete) -->
+                            <div v-if="isBulkDeleteModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+                                <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 animate-in fade-in duration-200">
+                                    <div class="flex items-center gap-3 mb-3">
+                                        <div class="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center text-xl shrink-0 font-bold">
+                                            🧹
+                                        </div>
+                                        <div>
+                                            <h3 class="text-sm font-bold text-gray-900">Toplu Görev & Test Temizliği</h3>
+                                            <p class="text-xs text-gray-500">Seçilen {{ selectedTaskIds.length }} adet görev soft delete yapılacak</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="p-3 bg-amber-50/80 rounded-xl border border-amber-200 text-[11px] text-amber-800 mb-4 leading-relaxed">
+                                        🛡️ <strong>Güvenli Soft Delete:</strong> Seçtiğiniz tüm kayıtlar geri alınabilir şekilde arşivlenir. Sunucuda biriken test süreçlerini tek seferde temizlemek için idealdir.
+                                    </div>
+
+                                    <div class="space-y-2.5 mb-5">
+                                        <label class="block text-xs font-bold text-gray-700 mb-1">Silme Kapsamı:</label>
+                                        
+                                        <label :class="['flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition', bulkDeleteForm.delete_scope === 'process' ? 'border-red-300 bg-red-50/50' : 'border-gray-200 hover:bg-gray-50']">
+                                            <input type="radio" value="process" v-model="bulkDeleteForm.delete_scope" class="mt-0.5 text-red-600 focus:ring-red-500" />
+                                            <div>
+                                                <div class="text-xs font-bold text-gray-900">🚀 Bağlı Tüm Test Süreçlerini Arşivle</div>
+                                                <div class="text-[11px] text-gray-500">Seçilen görevlerin ait olduğu süreçleri ve alt görevlerini kökten temizler.</div>
+                                            </div>
+                                        </label>
+
+                                        <label :class="['flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition', bulkDeleteForm.delete_scope === 'task' ? 'border-red-300 bg-red-50/50' : 'border-gray-200 hover:bg-gray-50']">
+                                            <input type="radio" value="task" v-model="bulkDeleteForm.delete_scope" class="mt-0.5 text-red-600 focus:ring-red-500" />
+                                            <div>
+                                                <div class="text-xs font-bold text-gray-900">📋 Yalnızca Seçilen Görevleri Arşivle</div>
+                                                <div class="text-[11px] text-gray-500">Süreçler silinmez, yalnızca seçilen görev kayıtları soft delete yapılır.</div>
+                                            </div>
+                                        </label>
+                                    </div>
+
+                                    <div class="flex justify-end gap-2.5 pt-3 border-t border-gray-100">
+                                        <button 
+                                            type="button" 
+                                            @click="isBulkDeleteModalOpen = false" 
+                                            class="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl"
+                                        >
+                                            Vazgeç
+                                        </button>
+                                        <button 
+                                            type="button" 
+                                            @click="submitBulkDelete"
+                                            :disabled="isBulkDeleteSubmitting"
+                                            class="px-5 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-500 rounded-xl shadow-md transition disabled:opacity-50"
+                                        >
+                                            <span v-if="isBulkDeleteSubmitting">Temizleniyor...</span>
+                                            <span v-else>🗑️ {{ selectedTaskIds.length }} Kaydı Güvenle Sil</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Completed Tasks Tab -->
                         <div v-if="activeTab === 'completed'">
+
                             <div v-if="completedTasks.length === 0" class="text-center py-8 text-gray-500">
                                 Henüz tamamlanmış bir göreviniz bulunmuyor.
                             </div>
@@ -440,11 +972,23 @@ const getDueInfo = (task) => {
                                                 {{ new Date(task.completed_at).toLocaleString() }}
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                <Link :href="route('tasks.show', task.id)"
-                                                    class="inline-flex items-center text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-md transition-colors font-bold">
-                                                    Detaylar &rarr;
-                                                </Link>
+                                                <div class="flex items-center justify-end gap-1.5">
+                                                    <Link :href="route('tasks.show', task.id)"
+                                                        class="inline-flex items-center text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-md transition-colors font-bold text-xs">
+                                                        Detaylar &rarr;
+                                                    </Link>
+                                                    <button 
+                                                        v-if="canAdminDelete"
+                                                        type="button"
+                                                        @click="openDeleteModal(task)"
+                                                        class="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                                                        title="Görevi / Süreci Sil (Soft Delete)"
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                </div>
                                             </td>
+
                                         </tr>
                                     </tbody>
                                 </table>

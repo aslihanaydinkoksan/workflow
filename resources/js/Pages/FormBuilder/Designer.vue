@@ -29,8 +29,16 @@ const form = useForm({
     revision_no: props.template?.revision_no || '0',
     revision_date: props.template?.revision_date ? props.template.revision_date.split('T')[0] : new Date().toISOString().split('T')[0],
     page_no: props.template?.page_no || 1,
+    paper_size: props.template?.paper_size || 'a4',
     logo_width: props.template?.logo_width || 4.5,
     logo_height: props.template?.logo_height || 1.5,
+});
+
+const computedLogo = computed(() => {
+    const raw = props.app_logo || '/images/koksan_logo.png';
+    if (!raw) return '/images/koksan_logo.png';
+    if (raw.startsWith('http') || raw.startsWith('/') || raw.startsWith('data:')) return raw;
+    return '/' + raw;
 });
 
 const availableTools = ref([
@@ -39,6 +47,7 @@ const availableTools = ref([
     { type: 'number', label: 'Sayı', icon: '🔢' },
     { type: 'select', label: 'Açılır Liste', icon: '🔽' },
     { type: 'radio', label: 'Tekli Seçim (Radio)', icon: '🔘' },
+    { type: 'yes_no', label: 'Evet / Hayır Karar', icon: '⚖️' },
     { type: 'date', label: 'Tarih', icon: '📅' },
     { type: 'date_range', label: 'Tarih Aralığı', icon: '📆' },
     { type: 'file', label: 'Dosya Yükleme', icon: '📎' },
@@ -50,18 +59,23 @@ const selectedField = ref(null);
 
 const cloneDog = (tool) => {
     const isRange = tool.type === 'date_range';
+    const isYesNo = tool.type === 'yes_no';
     return {
         id: 'field_' + Date.now() + Math.floor(Math.random() * 1000), // Benzersiz ID garantisi
         type: isRange ? 'date' : tool.type,
         date_mode: isRange ? 'range' : (tool.type === 'date' ? 'single' : undefined),
         allow_multiple: false,
         allow_note: false,
-        label: isRange ? 'Tarih Aralığı' : ('Yeni ' + tool.label),
-        required: false,
+        label: isRange ? 'Tarih Aralığı' : (isYesNo ? 'İşlem Onayı / Karar (Evet / Hayır)' : ('Yeni ' + tool.label)),
+        required: isYesNo ? true : false,
         placeholder: '',
         width: '12', // Grid sistemi için varsayılan tam genişlik (col-span-12)
         options: ['select', 'radio'].includes(tool.type) ? "Seçenek 1, Seçenek 2, Seçenek 3" : "",
-        description: '' // Header veya ek açıklama alanları için
+        yes_label: isYesNo ? 'Evet' : undefined,
+        no_label: isYesNo ? 'Hayır' : undefined,
+        show_note: isYesNo ? true : false,
+        note_placeholder: isYesNo ? 'Karar gerekçesi veya açıklama (İsteğe bağlı)' : undefined,
+        description: isYesNo ? 'Lütfen bu adım için onay veya ret kararınızı belirtiniz.' : ''
     };
 };
 
@@ -165,23 +179,57 @@ const handleDataBindChange = () => {
 
             <!-- ORTA PANEL: Canvas (Tasarım Alanı) -->
             <div class="flex-1 bg-gray-100 flex flex-col h-full overflow-hidden rounded-lg shadow-inner border border-gray-200 relative">
-                <div class="p-4 font-bold text-gray-700 text-center bg-white border-b shadow-sm z-10">
-                    Tasarım Alanı (Sürükle Bırak)
+                <div class="p-3 font-bold text-gray-700 bg-white border-b shadow-sm z-10 flex flex-wrap items-center justify-between gap-3 px-6">
+                    <div class="flex items-center gap-2">
+                        <span class="text-indigo-600">📐</span>
+                        <span class="text-sm font-bold text-gray-800">Tasarım Alanı</span>
+                        <span class="text-xs text-gray-400 font-normal hidden sm:inline">(Sürükle Bırak)</span>
+                    </div>
+
+                    <!-- Sayfa / Kağıt Boyutu Seçicisi (A4 vs A5) -->
+                    <div class="flex items-center gap-1.5 bg-gray-100 p-1 rounded-xl border border-gray-200">
+                        <button
+                            type="button"
+                            @click="form.paper_size = 'a4'"
+                            :class="[
+                                'px-3 py-1 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5',
+                                form.paper_size !== 'a5' 
+                                    ? 'bg-white text-indigo-700 shadow-xs border border-gray-200' 
+                                    : 'text-gray-500 hover:text-gray-800'
+                            ]"
+                            title="A4 Standart Tam Sayfa (210 × 297 mm)"
+                        >
+                            <span>📄</span> A4 Tam Sayfa
+                        </button>
+                        <button
+                            type="button"
+                            @click="form.paper_size = 'a5'"
+                            :class="[
+                                'px-3 py-1 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5',
+                                form.paper_size === 'a5' 
+                                    ? 'bg-white text-indigo-700 shadow-xs border border-gray-200' 
+                                    : 'text-gray-500 hover:text-gray-800'
+                            ]"
+                            title="A5 Yarım Sayfa (148 × 210 mm - Yarım A4)"
+                        >
+                            <span>📑</span> A5 Yarım Sayfa
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="flex-1 p-6 overflow-y-auto bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9IiNlNWU3ZWIiLz48L3N2Zz4=')]">
-                    <div class="bg-white p-8 rounded-xl shadow-md min-h-full max-w-4xl mx-auto border border-gray-100">
+                    <div 
+                        class="bg-white p-8 rounded-xl shadow-md min-h-full mx-auto border border-gray-100 transition-all duration-300"
+                        :class="form.paper_size === 'a5' ? 'max-w-2xl' : 'max-w-4xl'"
+                    >
                         <!-- KÖKSAN Form Başlığı Tablosu -->
                         <div class="mb-8 border-2 border-black w-full flex flex-col md:flex-row bg-white relative group" @click="selectField(null)">
                             <!-- Seçili Değilken Hover Efekti için gizli bir overlay (ayarlara yönlendirmek için) -->
                             <div class="absolute inset-0 border-2 border-transparent group-hover:border-indigo-300 pointer-events-none transition-colors"></div>
 
-                            <!-- Logo Alanı -->
-                            <div class="border-b-2 border-black md:border-b-0 md:border-r-2 border-black p-2 flex items-center justify-center min-w-[200px]">
-                                <img v-if="app_logo" :src="app_logo" alt="App Logo" :style="{ width: form.logo_width + 'cm', height: form.logo_height + 'cm', objectFit: 'contain' }">
-                                <div v-else class="text-xs text-gray-400 border border-dashed border-gray-300 p-4 flex items-center justify-center text-center" :style="{ width: form.logo_width + 'cm', height: form.logo_height + 'cm' }">
-                                    Logo Yüklenmemiş<br>(Sistem Ayarları)
-                                </div>
+                            <!-- Logo Alanı (Köksan Amblemi Otomatik Default) -->
+                            <div class="border-b-2 border-black md:border-b-0 md:border-r-2 border-black p-2 flex items-center justify-center min-w-[200px] bg-white">
+                                <img :src="computedLogo" alt="Köksan Amblemi" :style="{ width: form.logo_width + 'cm', height: form.logo_height + 'cm', objectFit: 'contain' }">
                             </div>
                             
                             <!-- Başlık Alanı -->
@@ -337,6 +385,37 @@ const handleDataBindChange = () => {
                                                 {{ element.data_bind ? '⚡ [Otomatik Onay: ' + getBindingLabel(element.data_bind) + ']' : 'Onay metni / Seçenek' }}
                                             </label>
                                         </div>
+
+                                        <!-- Evet / Hayır Karar Elemanı Render (Canvas) -->
+                                        <div v-if="element.type === 'yes_no'" class="p-3.5 bg-gradient-to-r from-slate-50 to-indigo-50/40 rounded-xl border border-indigo-200 space-y-3">
+                                            <div class="flex items-center justify-between">
+                                                <span class="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                                                    <span>⚖️</span> Karar / Onay Seçeneği
+                                                </span>
+                                                <span class="text-[11px] font-semibold text-indigo-700 bg-indigo-100/80 px-2.5 py-0.5 rounded-full border border-indigo-200">
+                                                    İş Akışı Onay / Ret Kararı
+                                                </span>
+                                            </div>
+
+                                            <p v-if="element.description" class="text-xs text-gray-600">{{ element.description }}</p>
+
+                                            <div class="grid grid-cols-2 gap-3 pt-1">
+                                                <div class="p-3 bg-white border-2 border-emerald-400 rounded-xl text-center flex items-center justify-center gap-2 shadow-xs font-bold text-emerald-700 cursor-not-allowed">
+                                                    <span class="text-base">✅</span>
+                                                    <span>{{ element.yes_label || 'Evet / Onaylandı' }}</span>
+                                                </div>
+                                                <div class="p-3 bg-white border-2 border-rose-400 rounded-xl text-center flex items-center justify-center gap-2 shadow-xs font-bold text-rose-700 cursor-not-allowed">
+                                                    <span class="text-base">❌</span>
+                                                    <span>{{ element.no_label || 'Hayır / Reddedildi' }}</span>
+                                                </div>
+                                            </div>
+
+                                            <div v-if="element.show_note" class="pt-1">
+                                                <input type="text" disabled 
+                                                    class="block w-full rounded-lg shadow-2xs sm:text-xs border-gray-300 bg-white text-gray-400 cursor-not-allowed"
+                                                    :placeholder="element.note_placeholder || 'Karar gerekçesi veya açıklama giriniz...'">
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </template>
@@ -478,6 +557,49 @@ const handleDataBindChange = () => {
                             </div>
                         </div>
 
+                        <!-- Evet / Hayır Karar Alanı Özel Ayarları -->
+                        <div v-if="selectedField.type === 'yes_no'" class="bg-indigo-50 p-4 rounded-lg border border-indigo-200 space-y-4">
+                            <h4 class="text-xs font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                                <span>⚖️</span> Karar Butonları Yapılandırması
+                            </h4>
+
+                            <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1">"Evet" Buton Metni</label>
+                                <input v-model="selectedField.yes_label" type="text" class="block w-full rounded-md border-indigo-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" placeholder="Evet / Onaylandı / Kabul">
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1">"Hayır" Buton Metni</label>
+                                <input v-model="selectedField.no_label" type="text" class="block w-full rounded-md border-indigo-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" placeholder="Hayır / Reddedildi / İptal">
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1">Yönerge / Talimat Metni</label>
+                                <textarea v-model="selectedField.description" rows="2" class="block w-full rounded-md border-indigo-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-xs" placeholder="Kullanıcıya bu kararla ilgili açıklama girin..."></textarea>
+                            </div>
+
+                            <div class="pt-2 border-t border-indigo-200">
+                                <label class="flex items-start gap-2.5 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        v-model="selectedField.show_note"
+                                        class="mt-0.5 h-4 w-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <div>
+                                        <span class="text-xs font-bold text-gray-900 block">Gerekçe / Not alanı gösterilsin mi?</span>
+                                        <span class="text-[11px] text-gray-600 block leading-tight mt-0.5">
+                                            İşaretlenirse, kullanıcı karar verirken ek açıklama veya ret gerekçesi girebilecektir.
+                                        </span>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <div v-if="selectedField.show_note">
+                                <label class="block text-xs font-bold text-gray-700 mb-1">Not Alanı Yer Tutucusu</label>
+                                <input v-model="selectedField.note_placeholder" type="text" class="block w-full rounded-md border-indigo-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-xs" placeholder="Örn: Karar gerekçenizi belirtiniz...">
+                            </div>
+                        </div>
+
                         <!-- Grid (Yerleşim) Ayarları -->
                         <div class="bg-purple-50 p-4 rounded-lg border border-purple-100 space-y-4">
                             <h4 class="text-xs font-bold text-purple-800 uppercase tracking-wider mb-2">Yerleşim (Grid)</h4>
@@ -531,6 +653,15 @@ const handleDataBindChange = () => {
                     <div v-else class="space-y-6">
                         <div class="bg-gray-50 p-4 rounded-lg border border-gray-100 space-y-4">
                             <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Doküman Ayarları</h4>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Kağıt / Baskı Boyutu</label>
+                                <select v-model="form.paper_size" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm font-semibold text-gray-800">
+                                    <option value="a4">📄 A4 (210 × 297 mm - Standart Tam Sayfa)</option>
+                                    <option value="a5">📑 A5 (148 × 210 mm - Yarım A4)</option>
+                                </select>
+                                <p class="text-[11px] text-gray-500 mt-1">Yazıcı çıktısı ve PDF oluşturulduğunda bu kağıt formatı sabitlenir.</p>
+                            </div>
                             
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Logo Genişliği (cm)</label>

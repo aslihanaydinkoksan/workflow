@@ -1,12 +1,124 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import { Head, Link } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
+import { ref, computed } from 'vue';
+import ReportChartRenderer from '@/Components/ReportChartRenderer.vue';
 
 const props = defineProps({
     stats: Object,
     user: Object,
+    all_users: {
+        type: Array,
+        default: () => [],
+    },
 });
+
+const page = usePage();
+const canViewDutyRadar = computed(() => {
+    const roles = page.props.auth?.roles || page.props.auth?.user?.roles || [];
+    if (roles.includes('Admin') || roles.some(r => (typeof r === 'string' ? r : r.name) === 'Admin')) {
+        return true;
+    }
+    const perms = page.props.auth?.permissions || [];
+    return perms.includes('duty_radar.view');
+});
+
+// RBAC İzin Kontrolleri (Spatie Yetki Matrisi /admin/roles üzerinden)
+const canAdminEdit = computed(() => {
+    const roles = page.props.auth?.roles || page.props.auth?.user?.roles || [];
+    if (roles.includes('Admin') || roles.some(r => (typeof r === 'string' ? r : r.name) === 'Admin')) {
+        return true;
+    }
+    const perms = page.props.auth?.permissions || [];
+    return perms.includes('tasks.admin_edit');
+});
+
+const canAdminDelete = computed(() => {
+    const roles = page.props.auth?.roles || page.props.auth?.user?.roles || [];
+    if (roles.includes('Admin') || roles.some(r => (typeof r === 'string' ? r : r.name) === 'Admin')) {
+        return true;
+    }
+    const perms = page.props.auth?.permissions || [];
+    return perms.includes('tasks.admin_delete');
+});
+
+// Admin Tekil Düzenleme Modalı
+const isEditModalOpen = ref(false);
+const selectedTaskForEdit = ref(null);
+const isEditSubmitting = ref(false);
+const editForm = useForm({
+    assigned_to: '',
+    due_date: '',
+    status: 'pending',
+    comment: '',
+});
+
+const openEditModal = (task) => {
+    selectedTaskForEdit.value = task;
+    let formattedDue = '';
+    if (task.due_date) {
+        const d = new Date(task.due_date);
+        const pad = (n) => String(n).padStart(2, '0');
+        formattedDue = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    editForm.assigned_to = task.assigned_to || '';
+    editForm.due_date = formattedDue;
+    editForm.status = task.status || 'pending';
+    editForm.comment = '';
+    isEditModalOpen.value = true;
+};
+
+const submitEdit = () => {
+    if (!selectedTaskForEdit.value) return;
+    isEditSubmitting.value = true;
+    editForm.put(route('tasks.admin-update', selectedTaskForEdit.value.id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            isEditModalOpen.value = false;
+            selectedTaskForEdit.value = null;
+            isEditSubmitting.value = false;
+        },
+        onError: () => {
+            isEditSubmitting.value = false;
+        }
+    });
+};
+
+// Admin Tekil Silme Modalı (Soft Delete)
+const isDeleteModalOpen = ref(false);
+const selectedTaskForDelete = ref(null);
+const isDeleteSubmitting = ref(false);
+const deleteForm = useForm({
+    delete_scope: 'process', // 'process' | 'task'
+});
+
+const openDeleteModal = (task) => {
+    selectedTaskForDelete.value = task;
+    deleteForm.delete_scope = 'process';
+    isDeleteModalOpen.value = true;
+};
+
+const submitDelete = () => {
+    if (!selectedTaskForDelete.value) return;
+    isDeleteSubmitting.value = true;
+    deleteForm.delete(route('tasks.admin-destroy', selectedTaskForDelete.value.id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            isDeleteModalOpen.value = false;
+            selectedTaskForDelete.value = null;
+            isDeleteSubmitting.value = false;
+        },
+        onError: () => {
+            isDeleteSubmitting.value = false;
+        }
+    });
+};
+
+const unpinWidget = (widget) => {
+    router.post(route('reports.widgets.toggle-pin', { widget: widget.id }), {}, {
+        preserveScroll: true,
+    });
+};
 
 const showAdminSection = ref(true);
 
@@ -73,6 +185,32 @@ const getTaskTitle = (task) => {
 
         <div class="py-6 sm:py-8">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 sm:space-y-8">
+                <!-- Canlı Saha & Personel Radarı (Kim Nerede?) Banner -->
+                <div v-if="canViewDutyRadar" class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-md border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div class="flex items-center gap-3.5">
+                        <div class="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-xl shrink-0">
+                            📍
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-sm sm:text-base font-bold text-white">Canlı Saha & Personel Radarı (Kim Nerede?)</h3>
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 animate-pulse">
+                                    Canlı
+                                </span>
+                            </div>
+                            <p class="text-xs text-slate-300 mt-0.5">
+                                Fuarda, müşteri ziyaretinde veya dış görevde olan personelin anlık lokasyon, görev ve vekalet takibi.
+                            </p>
+                        </div>
+                    </div>
+                    <Link
+                        :href="route('duty-radar.index')"
+                        class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 shadow-xs transition shrink-0"
+                    >
+                        <span>Personel Radarını Aç</span>
+                        <span>→</span>
+                    </Link>
+                </div>
 
                 <!-- 1. ÜÇ BÜYÜK CANLI AKSİYON KARTI -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-5 sm:gap-6">
@@ -163,7 +301,35 @@ const getTaskTitle = (task) => {
                         </div>
                         <div class="absolute -bottom-6 -right-6 text-8xl text-white/10 select-none pointer-events-none">⏱️</div>
                     </Link>
+                </div>
 
+                <!-- 1.5 SABİTLENEN POWER BI RAPOR VE METRİK PANO BÖLÜMÜ -->
+                <div v-if="stats.pinned_widgets && stats.pinned_widgets.length > 0" class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 font-bold text-lg">
+                                📊
+                            </span>
+                            <div>
+                                <h3 class="font-bold text-lg text-gray-900">Sabitlenen Power BI Metrik & Rapor Panosu</h3>
+                                <p class="text-xs text-gray-500">Raporlama merkezinden ana sayfanıza iğnelenen canlı analitik grafikler</p>
+                            </div>
+                        </div>
+                        <Link :href="route('reports.index')" class="text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1">
+                            <span>Tüm Raporlama & BI Panoları</span> &rarr;
+                        </Link>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div v-for="item in stats.pinned_widgets" :key="item.widget.id" class="h-full">
+                            <ReportChartRenderer
+                                :widget="item.widget"
+                                :chart-data="item.result"
+                                :can-manage="false"
+                                @togglePin="unpinWidget(item.widget)"
+                            />
+                        </div>
+                    </div>
                 </div>
 
                 <!-- 2. BÖLÜM: BANA ATANAN ACİL İŞLER (GELEN KUTUSU LİSTESİ) -->
@@ -219,12 +385,32 @@ const getTaskTitle = (task) => {
                                 </div>
                             </div>
 
-                            <Link 
-                                :href="route('tasks.show', task.id)"
-                                class="inline-flex items-center justify-center px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm hover:shadow transition shrink-0"
-                            >
-                                Göreve Git &rarr;
-                            </Link>
+                            <div class="flex items-center gap-1.5 shrink-0">
+                                <Link 
+                                    :href="route('tasks.show', task.id)"
+                                    class="inline-flex items-center justify-center px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm hover:shadow transition"
+                                >
+                                    Göreve Git &rarr;
+                                </Link>
+                                <button 
+                                    v-if="canAdminEdit"
+                                    type="button"
+                                    @click="openEditModal(task)"
+                                    class="p-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-xl transition border border-indigo-100"
+                                    title="Görevi Düzenle / Yeniden Ata (Admin)"
+                                >
+                                    ✏️
+                                </button>
+                                <button 
+                                    v-if="canAdminDelete"
+                                    type="button"
+                                    @click="openDeleteModal(task)"
+                                    class="p-2 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-xl transition border border-rose-100"
+                                    title="Görevi / Süreci Sil (Soft Delete)"
+                                >
+                                    🗑️
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -430,6 +616,144 @@ const getTaskTitle = (task) => {
                     </div>
                 </div>
 
+            </div>
+        </div>
+
+        <!-- Admin Görev Düzenleme Modalı -->
+        <div v-if="isEditModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 animate-in fade-in duration-200">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl shrink-0 font-bold">
+                        ✏️
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-gray-900">Görevi Düzenle (Admin)</h3>
+                        <p class="text-xs text-gray-500">Görev No: #{{ selectedTaskForEdit?.id }} · Talep No: #{{ selectedTaskForEdit?.process_instance_id }}</p>
+                    </div>
+                </div>
+
+                <form @submit.prevent="submitEdit" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1">Atanan Personel / Kullanıcı:</label>
+                        <select 
+                            v-model="editForm.assigned_to" 
+                            class="w-full text-xs rounded-xl border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                            required
+                        >
+                            <option value="">Seçiniz...</option>
+                            <option v-for="u in all_users" :key="u.id" :value="u.id">
+                                {{ u.name }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1">Son Teslim Tarihi / Vade (Due Date):</label>
+                        <input 
+                            type="datetime-local" 
+                            v-model="editForm.due_date"
+                            class="w-full text-xs rounded-xl border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                        />
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1">Görev Durumu:</label>
+                        <select 
+                            v-model="editForm.status" 
+                            class="w-full text-xs rounded-xl border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                        >
+                            <option value="pending">Bekliyor (pending)</option>
+                            <option value="completed">Tamamlandı (completed)</option>
+                            <option value="cancelled">İptal Edildi (cancelled)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1">Yönetici Notu / Gerekçe (İsteğe Bağlı):</label>
+                        <textarea 
+                            v-model="editForm.comment" 
+                            rows="2" 
+                            class="w-full text-xs rounded-xl border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                            placeholder="Müdahale gerekçesi, audit günlüğüne işlenecektir..."
+                        ></textarea>
+                    </div>
+
+                    <div class="flex justify-end gap-2.5 pt-3 border-t border-gray-100">
+                        <button 
+                            type="button" 
+                            @click="isEditModalOpen = false" 
+                            class="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl"
+                        >
+                            Vazgeç
+                        </button>
+                        <button 
+                            type="submit" 
+                            :disabled="isEditSubmitting"
+                            class="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-md transition disabled:opacity-50"
+                        >
+                            <span v-if="isEditSubmitting">Kaydediliyor...</span>
+                            <span v-else>💾 Değişiklikleri Kaydet</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Admin Görev / Süreç Silme Modalı (Soft Delete) -->
+        <div v-if="isDeleteModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 animate-in fade-in duration-200">
+                <div class="flex items-center gap-3 mb-3">
+                    <div class="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl shrink-0 font-bold">
+                        🗑️
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-gray-900">Görevi / Süreci Sil (Soft Delete)</h3>
+                        <p class="text-xs text-gray-500">Görev No: #{{ selectedTaskForDelete?.id }} · Talep No: #{{ selectedTaskForDelete?.process_instance_id }}</p>
+                    </div>
+                </div>
+
+                <div class="p-3 bg-amber-50/80 rounded-xl border border-amber-200 text-[11px] text-amber-800 mb-4 leading-relaxed">
+                    🛡️ <strong>Güvenli Soft Delete:</strong> Bu kayıtlar veritabanından kalıcı olarak yok edilmez. <code>deleted_at</code> damgası ile güvenle arşivlenir. Gerekirse sistem yöneticisi tarafından kurtarılabilir.
+                </div>
+
+                <div class="space-y-2.5 mb-5">
+                    <label class="block text-xs font-bold text-gray-700 mb-1">Silme Kapsamını Seçin:</label>
+                    
+                    <label :class="['flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition', deleteForm.delete_scope === 'process' ? 'border-rose-300 bg-rose-50/50' : 'border-gray-200 hover:bg-gray-50']">
+                        <input type="radio" value="process" v-model="deleteForm.delete_scope" class="mt-0.5 text-rose-600 focus:ring-rose-500" />
+                        <div>
+                            <div class="text-xs font-bold text-gray-900">🚀 Bağlı Test Sürecini ve Tüm Görevlerini Arşivle</div>
+                            <div class="text-[11px] text-gray-500">Süreci (#{{ selectedTaskForDelete?.process_instance_id }}) ve ona ait bekleyen tüm görevleri temizler (Önerilen).</div>
+                        </div>
+                    </label>
+
+                    <label :class="['flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition', deleteForm.delete_scope === 'task' ? 'border-rose-300 bg-rose-50/50' : 'border-gray-200 hover:bg-gray-50']">
+                        <input type="radio" value="task" v-model="deleteForm.delete_scope" class="mt-0.5 text-rose-600 focus:ring-rose-500" />
+                        <div>
+                            <div class="text-xs font-bold text-gray-900">📋 Yalnızca Bu Tekil Görevi Arşivle</div>
+                            <div class="text-[11px] text-gray-500">Süreç açık kalmaya devam eder, yalnızca bu personelin görevi soft delete yapılır.</div>
+                        </div>
+                    </label>
+                </div>
+
+                <div class="flex justify-end gap-2.5 pt-3 border-t border-gray-100">
+                    <button 
+                        type="button" 
+                        @click="isDeleteModalOpen = false" 
+                        class="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl"
+                    >
+                        Vazgeç
+                    </button>
+                    <button 
+                        type="button" 
+                        @click="submitDelete"
+                        :disabled="isDeleteSubmitting"
+                        class="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 rounded-xl shadow-md transition disabled:opacity-50"
+                    >
+                        <span v-if="isDeleteSubmitting">Siliniyor...</span>
+                        <span v-else>🗑️ Güvenle Sil (Soft Delete)</span>
+                    </button>
+                </div>
             </div>
         </div>
     </AuthenticatedLayout>

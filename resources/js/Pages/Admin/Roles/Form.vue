@@ -1,169 +1,354 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head, useForm, Link } from '@inertiajs/vue3';
+import { ref, computed } from 'vue';
 
 const props = defineProps({
     role: Object,
-    permissions: Array,
-    rolePermissions: Array
+    modules: { type: Array, default: () => [] },
+    permissions: { type: Array, default: () => [] },
+    rolePermissions: { type: Array, default: () => [] },
 });
 
 const form = useForm({
     name: props.role?.name || '',
-    permissions: props.rolePermissions || []
+    permissions: props.rolePermissions || [],
 });
+
+const searchQuery = ref('');
 
 const submit = () => {
     if (props.role && props.role.id) {
-        // Parametreyi süslü parantez (obje) içinde gönder!
         form.put(route('admin.roles.update', { role: props.role.id }));
     } else {
         form.post(route('admin.roles.store'));
     }
 };
 
-
-const permissionLabels = {
-    // Sistem ve Yönetim
-    'view_admin_panel': 'Admin Paneline Girebilir',
-    'manage_users': 'Kullanıcı Havuzunu Yönetebilir',
-    'manage_roles': 'Rolleri ve Yetki Matrisini Yönetebilir',
-    'manage_departments': 'Departmanları Yönetebilir',
-    'manage_directorates': 'Direktörlükleri Yönetebilir',
-    'manage_settings': 'Sistem Ayarlarını Değiştirebilir',
-
-    // Şablon ve Akış Tasarımı
-    'manage_workflows': 'İş Akışı (Workflow) Tasarımı Yapabilir',
-    'create_forms': 'Yeni Form Şablonu Oluşturabilir',
-    'templates.edit': 'Şablonları Düzenleyebilir',
-    'templates.delete': 'Şablonları Silebilir',
-    'templates.publish': 'Şablonları Yayına (Kullanıma) Alabilir',
-
-    // Süreç ve Görev Yönetimi
-    'start_processes': 'Süreç Başlatabilir ve Kendi Görevlerini Yapabilir',
-    'processes.approve': 'Formları ve Görevleri Onaylayabilir veya Reddedebilir',
-    'processes.assign': 'Formları Başka Kullanıcılara Atayabilir',
-    'processes.cancel': 'Süreçleri İptal Edebilir',
-    'processes.view_own': 'Sadece Kendi Başlattığı/İçinde Olduğu Süreçleri Görebilir',
-    'processes.view_department': 'Kendi Departmanına Ait Tüm Süreçleri Görebilir',
-    'processes.view_directorate': 'Kendi Direktörlüğüne Bağlı Tüm Süreçleri Görebilir',
-    'processes.view_all': 'Sistemdeki İstisnasız Tüm Süreçleri Görebilir',
+// Modül bazında yetki sayısı hesaplayıcı
+const selectedCountInModule = (module) => {
+    return module.permissions.filter(p => form.permissions.includes(p.name)).length;
 };
 
-const getPermissionLabel = (name) => {
-    return permissionLabels[name] || name;
+const isModuleAllSelected = (module) => {
+    if (!module.permissions.length) return false;
+    return module.permissions.every(p => form.permissions.includes(p.name));
 };
 
-const permissionDescriptions = {
-    'processes.cancel': 'Takip ekranından devam eden süreçleri iptal eder. Bekleyen görevler kapatılır ve süreç sonlandırılır.',
-    'processes.approve': 'Kendisine atanan onay, inceleme ve form görevlerini tamamlayabilir.',
-    'processes.assign': 'Görevleri başka kullanıcılara yeniden atayabilir.',
-    'start_processes': 'Yeni süreç başlatabilir ve kendi görev listesini yönetebilir.',
-};
+const toggleModule = (module) => {
+    const allSelected = isModuleAllSelected(module);
+    const modPermNames = module.permissions.map(p => p.name);
 
-const getPermissionDescription = (name) => {
-    return permissionDescriptions[name] || null;
-};
-
-const permissionGroups = [
-    {
-        name: 'Süreç ve Görev Yönetimi',
-        description: 'Süreç başlatma, onaylama, iptal etme ve izleme yetkileri',
-        icon: '<svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
-        keys: [
-            'start_processes', 'processes.approve', 'processes.assign', 'processes.cancel',
-            'processes.view_own', 'processes.view_department', 'processes.view_directorate', 'processes.view_all'
-        ]
-    },
-    {
-        name: 'Şablon ve Akış Tasarımı',
-        description: 'Form ve iş akışı şablonlarının oluşturulması ve yönetimi',
-        icon: '<svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>',
-        keys: [
-            'manage_workflows', 'create_forms', 'templates.edit', 'templates.delete', 'templates.publish'
-        ]
-    },
-    {
-        name: 'Sistem Yönetimi',
-        description: 'Kullanıcı, departman ve genel sistem ayarları',
-        icon: '<svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>',
-        keys: [
-            'view_admin_panel', 'manage_users', 'manage_roles', 'manage_departments', 'manage_directorates', 'manage_settings'
-        ]
+    if (allSelected) {
+        // Hepsini kaldır
+        form.permissions = form.permissions.filter(name => !modPermNames.includes(name));
+    } else {
+        // Hepsini ekle
+        const newSet = new Set([...form.permissions, ...modPermNames]);
+        form.permissions = Array.from(newSet);
     }
-];
-
-const getGroupPermissions = (groupKeys) => {
-    return props.permissions.filter(p => groupKeys.includes(p.name));
 };
 
+// Global Tümünü Seç / Temizle
+const selectAllEverywhere = () => {
+    const allNames = props.modules.flatMap(m => m.permissions.map(p => p.name));
+    form.permissions = Array.from(new Set(allNames));
+};
+
+const deselectAllEverywhere = () => {
+    form.permissions = [];
+};
+
+// Canlı Arama Filtresi
+const filteredModules = computed(() => {
+    if (!searchQuery.value.trim()) return props.modules;
+    const q = searchQuery.value.toLowerCase().trim();
+
+    return props.modules.map(mod => {
+        const matchingPerms = mod.permissions.filter(p => 
+            p.name.toLowerCase().includes(q) ||
+            p.label.toLowerCase().includes(q) ||
+            (p.description && p.description.toLowerCase().includes(q))
+        );
+        return {
+            ...mod,
+            permissions: matchingPerms,
+        };
+    }).filter(mod => mod.permissions.length > 0);
+});
+
+const totalPermissionsCount = computed(() => {
+    return props.modules.reduce((sum, m) => sum + m.permissions.length, 0);
+});
+
+// Renk stilleri haritası
+const colorClasses = {
+    indigo: {
+        border: 'border-indigo-200 dark:border-indigo-800/60',
+        header: 'bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200',
+        badge: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-300',
+        ring: 'focus:ring-indigo-500 text-indigo-600',
+    },
+    amber: {
+        border: 'border-amber-200 dark:border-amber-800/60',
+        header: 'bg-amber-50/70 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200',
+        badge: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300',
+        ring: 'focus:ring-amber-500 text-amber-600',
+    },
+    emerald: {
+        border: 'border-emerald-200 dark:border-emerald-800/60',
+        header: 'bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200',
+        badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300',
+        ring: 'focus:ring-emerald-500 text-emerald-600',
+    },
+    teal: {
+        border: 'border-teal-200 dark:border-teal-800/60',
+        header: 'bg-teal-50/70 dark:bg-teal-950/40 text-teal-900 dark:text-teal-200',
+        badge: 'bg-teal-100 text-teal-800 dark:bg-teal-900/60 dark:text-teal-300',
+        ring: 'focus:ring-teal-500 text-teal-600',
+    },
+    blue: {
+        border: 'border-blue-200 dark:border-blue-800/60',
+        header: 'bg-blue-50/70 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200',
+        badge: 'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300',
+        ring: 'focus:ring-blue-500 text-blue-600',
+    },
+    rose: {
+        border: 'border-rose-200 dark:border-rose-800/60',
+        header: 'bg-rose-50/70 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200',
+        badge: 'bg-rose-100 text-rose-800 dark:bg-rose-900/60 dark:text-rose-300',
+        ring: 'focus:ring-rose-500 text-rose-600',
+    },
+    purple: {
+        border: 'border-purple-200 dark:border-purple-800/60',
+        header: 'bg-purple-50/70 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200',
+        badge: 'bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300',
+        ring: 'focus:ring-purple-500 text-purple-600',
+    },
+    cyan: {
+        border: 'border-cyan-200 dark:border-cyan-800/60',
+        header: 'bg-cyan-50/70 dark:bg-cyan-950/40 text-cyan-900 dark:text-cyan-200',
+        badge: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/60 dark:text-cyan-300',
+        ring: 'focus:ring-cyan-500 text-cyan-600',
+    },
+    slate: {
+        border: 'border-slate-200 dark:border-slate-700/60',
+        header: 'bg-slate-50/70 dark:bg-slate-800 text-slate-800 dark:text-slate-200',
+        badge: 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300',
+        ring: 'focus:ring-slate-500 text-slate-600',
+    },
+};
+
+const getModuleStyle = (color) => {
+    return colorClasses[color] || colorClasses.slate;
+};
 </script>
 
 <template>
-    <Head :title="role ? 'Rol Düzenle' : 'Yeni Rol Ekle'" />
+    <Head :title="role ? 'Rol Düzenle: ' + role.name : 'Yeni Rol Oluştur'" />
 
     <AuthenticatedLayout>
         <template #header>
-            <div class="flex items-center space-x-4">
-                <Link :href="route('admin.roles.index')" class="text-gray-500 hover:text-gray-700">&larr; Geri</Link>
-                <h2 class="font-semibold text-xl text-gray-800 leading-tight">
-                    {{ role ? 'Rol Düzenle' : 'Yeni Rol Oluştur' }}
-                </h2>
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div class="flex items-center space-x-3">
+                    <Link :href="route('admin.roles.index')" class="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-50 transition-colors shadow-2xs text-xs font-bold">
+                        &larr; Rol Listesi
+                    </Link>
+                    <div>
+                        <h2 class="font-black text-xl text-slate-900 dark:text-white leading-tight flex items-center gap-2">
+                            <span>🛡️</span>
+                            {{ role ? 'Rol & Yetki Düzenleme: ' + role.name : 'Yeni Kurumsal Rol Tanımla' }}
+                        </h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            Geleceğe dönük modüler yetki matrisi üzerinden rolün sistemdeki tüm erişim kapsamını belirleyin.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-semibold px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                        Seçili: <strong>{{ form.permissions.length }}</strong> / {{ totalPermissionsCount }} Yetki
+                    </span>
+                </div>
             </div>
         </template>
 
-        <div class="py-12">
-            <div class="max-w-6xl mx-auto sm:px-6 lg:px-8">
-                <div class="bg-white overflow-hidden shadow-sm sm:rounded-xl border border-gray-100">
-                    <form @submit.prevent="submit" class="p-8 space-y-8">
-                        
-                        <div class="bg-gray-50 p-6 rounded-xl border border-gray-100">
-                            <label class="block font-bold text-xs text-gray-600 uppercase tracking-wide mb-2">Rol Adı (Örn: Admin, Müdür, Müşteri)</label>
-                            <input v-model="form.name" type="text" class="block w-full max-w-md rounded-lg sm:text-sm font-semibold bg-white border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500" required placeholder="Rol adını girin...">
-                            <div v-if="form.errors.name" class="text-red-500 text-xs mt-2">{{ form.errors.name }}</div>
-                            <p class="text-sm text-gray-500 mt-2">Bu rolü kullanıcılara atayarak yetki matrisinde seçtiğiniz haklara sahip olmalarını sağlayabilirsiniz. <strong>Uyarı:</strong> İsim değişikliği yapmak eski başlatılmış görevlerin detaylarındaki (snapshot) rol adını etkilemez ancak yetki matrisini hemen uygular.</p>
+        <div class="py-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+            <form @submit.prevent="submit" class="space-y-6">
+                <!-- 1. Rol Adı & Temel Bilgiler Kartı -->
+                <div class="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-xs">
+                    <div class="max-w-xl">
+                        <label class="block font-bold text-xs text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                            Rol Adı * (Örn: Admin, Satış Temsilcisi, İşletme Şefi, İdari İşler)
+                        </label>
+                        <input
+                            v-model="form.name"
+                            type="text"
+                            required
+                            placeholder="Rol adını girin..."
+                            class="w-full text-sm font-bold rounded-xl border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-indigo-500 focus:border-indigo-500 shadow-2xs"
+                        />
+                        <div v-if="form.errors.name" class="text-rose-600 text-xs mt-1.5 font-bold">
+                            {{ form.errors.name }}
+                        </div>
+                        <p class="text-xs text-slate-400 dark:text-slate-500 mt-1.5 leading-relaxed">
+                            Bu rol kullanıcılara veya iş akışı adımlarına atandığında aşağıdaki seçilen yetkiler anında devreye girer.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- 2. Matris Kontrol ve Canlı Arama Çubuğu -->
+                <div class="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-base">🧩</span>
+                        <div>
+                            <h3 class="text-sm font-extrabold text-slate-900 dark:text-white">
+                                Modüler Yetki Matrisi ({{ filteredModules.length }} Modül)
+                            </h3>
+                            <p class="text-[11px] text-slate-400">
+                                Gelecekte eklenen modüller buraya otomatik entegre olur.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2">
+                        <!-- Arama Kutusu -->
+                        <div class="relative min-w-[220px]">
+                            <input
+                                v-model="searchQuery"
+                                type="text"
+                                placeholder="Yetki veya modül ara..."
+                                class="w-full text-xs py-1.5 pl-8 pr-3 rounded-xl border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-indigo-500 shadow-2xs"
+                            />
+                            <span class="absolute left-2.5 top-2 text-slate-400 text-xs">🔍</span>
                         </div>
 
-                        <div class="mt-8">
-                            <h3 class="text-xl font-extrabold text-gray-900 border-b border-gray-200 pb-4 mb-6">Yetki Matrisi</h3>
-                            
-                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                                <div v-for="group in permissionGroups" :key="group.name" class="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                                    <div class="bg-gray-50 px-5 py-4 border-b border-gray-200 flex items-center">
-                                        <div v-html="group.icon" class="mr-3 p-1.5 bg-white rounded-lg shadow-sm"></div>
-                                        <div>
-                                            <h4 class="font-bold text-gray-900 text-sm">{{ group.name }}</h4>
-                                            <p class="text-xs text-gray-500 mt-0.5">{{ group.description }}</p>
-                                        </div>
+                        <!-- Hızlı Hepsini Seç / Kaldır Butonları -->
+                        <button
+                            type="button"
+                            @click="selectAllEverywhere"
+                            class="px-3 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 rounded-xl transition-colors border border-indigo-200 dark:border-indigo-800/60"
+                        >
+                            ✓ Tümünü Seç
+                        </button>
+                        <button
+                            type="button"
+                            @click="deselectAllEverywhere"
+                            class="px-3 py-1.5 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors border border-slate-200 dark:border-slate-700"
+                        >
+                            ✕ Temizle
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 3. DİNAMİK MODÜL KARTLARI GRİDİ (2 Kolon) -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div
+                        v-for="mod in filteredModules"
+                        :key="mod.id"
+                        class="bg-white dark:bg-slate-800 rounded-2xl border overflow-hidden shadow-xs hover:shadow-md transition-shadow flex flex-col justify-between"
+                        :class="getModuleStyle(mod.badge_color).border"
+                    >
+                        <div>
+                            <!-- Modül Kartı Başlığı -->
+                            <div class="p-4 border-b flex items-start justify-between gap-3" :class="getModuleStyle(mod.badge_color).header">
+                                <div class="flex items-start gap-2.5">
+                                    <span class="text-xl p-1.5 rounded-xl bg-white dark:bg-slate-900 shadow-2xs shrink-0">
+                                        {{ mod.icon }}
+                                    </span>
+                                    <div>
+                                        <h4 class="font-extrabold text-xs tracking-tight flex items-center gap-2">
+                                            {{ mod.title }}
+                                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full" :class="getModuleStyle(mod.badge_color).badge">
+                                                {{ selectedCountInModule(mod) }} / {{ mod.permissions.length }}
+                                            </span>
+                                        </h4>
+                                        <p class="text-[11px] opacity-80 mt-0.5 leading-snug">
+                                            {{ mod.description }}
+                                        </p>
                                     </div>
-                                    
-                                    <div class="p-5 space-y-3">
-                                        <div v-for="permission in getGroupPermissions(group.keys)" :key="permission.id" class="flex items-start">
-                                            <div class="flex items-center h-5 mt-0.5">
-                                                <input :id="'perm_'+permission.id" type="checkbox" :value="permission.name" v-model="form.permissions" class="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer transition-colors">
-                                            </div>
-                                            <div class="ml-3 text-sm flex-1">
-                                                <label :for="'perm_'+permission.id" class="font-bold text-gray-700 cursor-pointer block leading-tight">{{ getPermissionLabel(permission.name) }}</label>
-                                                <p v-if="getPermissionDescription(permission.name)" class="text-gray-500 text-xs mt-1 leading-snug">
-                                                    {{ getPermissionDescription(permission.name) }}
-                                                </p>
-                                                <p class="text-gray-400 text-[10px] font-mono mt-1">{{ permission.name }}</p>
-                                            </div>
+                                </div>
+
+                                <!-- Modülün Tümünü Seç/Kaldır Butonu -->
+                                <button
+                                    type="button"
+                                    @click="toggleModule(mod)"
+                                    class="text-[11px] font-bold px-2 py-1 bg-white/70 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-900 rounded-lg transition-colors border border-current/20 shrink-0"
+                                >
+                                    {{ isModuleAllSelected(mod) ? 'Kaldır' : 'Tümünü Seç' }}
+                                </button>
+                            </div>
+
+                            <!-- Modülün Yetki Listesi -->
+                            <div class="p-4 space-y-3">
+                                <div
+                                    v-for="perm in mod.permissions"
+                                    :key="perm.id"
+                                    class="p-2.5 rounded-xl transition-colors flex items-start gap-3 hover:bg-slate-50 dark:hover:bg-slate-900/50 border border-transparent hover:border-slate-200/60 dark:hover:border-slate-700/50"
+                                    :class="form.permissions.includes(perm.name) ? 'bg-indigo-50/30 dark:bg-indigo-950/20' : ''"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        :id="'perm_' + perm.id"
+                                        :value="perm.name"
+                                        v-model="form.permissions"
+                                        class="mt-0.5 rounded border-slate-300 dark:border-slate-700 transition-colors shadow-2xs"
+                                        :class="getModuleStyle(mod.badge_color).ring"
+                                    />
+                                    <label :for="'perm_' + perm.id" class="flex-1 cursor-pointer select-none">
+                                        <div class="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center justify-between">
+                                            <span>{{ perm.label }}</span>
+                                            <code class="text-[10px] font-mono text-slate-400 font-normal ml-2">
+                                                {{ perm.name }}
+                                            </code>
                                         </div>
-                                        <div v-if="getGroupPermissions(group.keys).length === 0" class="text-sm text-gray-400 italic text-center py-4">Bu grupta yetki bulunamadı.</div>
-                                    </div>
+                                        <p v-if="perm.description" class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                                            {{ perm.description }}
+                                        </p>
+                                    </label>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="flex items-center justify-end border-t border-gray-100 mt-8 pt-6">
-                            <button type="submit" :disabled="form.processing" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg shadow-indigo-200 transition-all focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 text-sm tracking-wide">
-                                {{ form.processing ? 'Kaydediliyor...' : 'Yetki Matrisini Kaydet' }}
-                            </button>
+                        <!-- Kart Alt Durum Çizgisi -->
+                        <div class="px-4 py-2 bg-slate-50 dark:bg-slate-900/40 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 flex items-center justify-between">
+                            <span>Modül Kodu: <strong>{{ mod.id }}</strong></span>
+                            <span>{{ selectedCountInModule(mod) === mod.permissions.length ? '✅ Tam Yetkili' : (selectedCountInModule(mod) > 0 ? '⚡ Kısmi Yetki' : '🔒 Kapalı') }}</span>
                         </div>
-                    </form>
+                    </div>
                 </div>
-            </div>
+
+                <!-- Boş Arama Sonucu -->
+                <div v-if="filteredModules.length === 0" class="text-center py-12 bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">
+                    <span class="text-3xl block mb-2">🔍</span>
+                    <h4 class="text-sm font-bold text-slate-800 dark:text-slate-100">Aramanıza Uygun Yetki Bulunamadı</h4>
+                    <p class="text-xs text-slate-400 mt-1">"{{ searchQuery }}" terimi ile eşleşen bir modül veya yetki kaydı yok.</p>
+                </div>
+
+                <!-- 4. Kaydet Butonu Çubuğu -->
+                <div class="sticky bottom-4 bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg flex items-center justify-between gap-4 z-20">
+                    <div class="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
+                        Toplam <strong>{{ form.permissions.length }} adet</strong> operasyonel yetki bu role atanacak.
+                    </div>
+
+                    <div class="flex items-center gap-3 ml-auto">
+                        <Link
+                            :href="route('admin.roles.index')"
+                            class="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors"
+                        >
+                            İptal
+                        </Link>
+                        <button
+                            type="submit"
+                            :disabled="form.processing"
+                            class="px-6 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all shadow-md shadow-indigo-500/20 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            <span>💾</span>
+                            {{ form.processing ? 'Kaydediliyor...' : 'Rolü & Yetkileri Kaydet' }}
+                        </button>
+                    </div>
+                </div>
+            </form>
         </div>
     </AuthenticatedLayout>
 </template>

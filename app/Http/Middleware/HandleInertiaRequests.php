@@ -100,6 +100,23 @@ class HandleInertiaRequests extends Middleware
                 ->limit(8)
                 ->get(['id', 'type', 'title', 'body', 'data', 'read_at', 'created_at'])
                 : [],
+            'active_delegation_given' => fn() => $user ? \App\Models\Delegation::with('delegatee:id,name,email')
+                ->where('delegator_id', $user->id)
+                ->whereIn('status', ['active', 'approved'])
+                ->whereDate('start_date', '<=', \Illuminate\Support\Carbon::today()->toDateString())
+                ->whereDate('end_date', '>=', \Illuminate\Support\Carbon::today()->toDateString())
+                ->latest()
+                ->first() : null,
+            'active_delegations_received' => fn() => $user ? \App\Models\Delegation::with('delegator:id,name,email')
+                ->where('delegatee_id', $user->id)
+                ->whereIn('status', ['active', 'approved'])
+                ->whereDate('start_date', '<=', \Illuminate\Support\Carbon::today()->toDateString())
+                ->whereDate('end_date', '>=', \Illuminate\Support\Carbon::today()->toDateString())
+                ->get() : [],
+            'all_colleagues' => fn() => $user ? \App\Models\User::where('id', '!=', $user->id)
+                ->select('id', 'name', 'email', 'title')
+                ->orderBy('name')
+                ->get() : [],
             'dev_mode' => app()->environment('local'),
             'dev_users' => fn () => app()->environment('local') ? \App\Models\User::with(['roles:id,name', 'department:id,name'])
                 ->select('id', 'name', 'first_name', 'last_name', 'email', 'title', 'department_id')

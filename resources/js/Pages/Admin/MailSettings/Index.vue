@@ -37,6 +37,14 @@ const props = defineProps({
             Sunday: 'Pazar',
         }),
     },
+    digestStats: {
+        type: Object,
+        default: () => ({
+            pending_count: 0,
+            sent_today_count: 0,
+            recent_items: [],
+        }),
+    },
 });
 
 // ==========================================
@@ -51,6 +59,25 @@ const globalForm = useForm({
 const saveGlobalSettings = () => {
     globalForm.post(route('admin.mail-settings.global.update'), {
         preserveScroll: true,
+    });
+};
+
+// ==========================================
+// 1.5 SABAH ÖZETİ (MORNING DIGEST) MOTORU
+// ==========================================
+const sendingDigest = ref(false);
+const showDigestDetails = ref(false);
+
+const triggerMorningDigest = () => {
+    if (!confirm('Kuyrukta bekleyen tüm mesai dışı bildirimler sabah özet bülteni olarak alıcılara iletilecektir. Emin misiniz?')) {
+        return;
+    }
+    sendingDigest.value = true;
+    router.post(route('admin.mail-settings.send-digest'), {}, {
+        preserveScroll: true,
+        onFinish: () => {
+            sendingDigest.value = false;
+        },
     });
 };
 
@@ -413,6 +440,133 @@ const deleteEvent = (event) => {
                             </button>
                         </div>
                     </form>
+                </div>
+
+                <!-- SECTION 1.5: MORNING DIGEST & OFF-HOURS NOTIFICATION QUEUE -->
+                <div class="rounded-2xl p-6 shadow-sm border bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-indigo-500/10 border-amber-200/80">
+                    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                        <div class="space-y-1">
+                            <div class="flex items-center gap-2">
+                                <span class="text-2xl">☀️</span>
+                                <h3 class="text-lg font-bold text-gray-900">
+                                    Sabah Yönetici Özeti (Morning Digest) & Mesai Dışı Kuyruk
+                                </h3>
+                                <span class="px-2.5 py-0.5 text-xs font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                                    ⏰ Her Sabah 08:30
+                                </span>
+                            </div>
+                            <p class="text-sm text-gray-600 max-w-3xl">
+                                Gece yarısı veya mesai saatleri dışında (18:30 - 08:30) tetiklenen SLA eskalasyonları ve görev hatırlatmaları,
+                                yöneticileri rahatsız etmemek için kuyruğa alınır ve sabah mesai başlangıcında tek bir kurumsal bülten olarak iletilir.
+                            </p>
+                        </div>
+
+                        <div class="flex items-center gap-4 shrink-0">
+                            <button
+                                type="button"
+                                @click="showDigestDetails = !showDigestDetails"
+                                class="px-4 py-2 bg-white hover:bg-gray-50 border border-gray-300 rounded-xl text-xs font-bold text-gray-700 shadow-sm transition flex items-center gap-1.5"
+                            >
+                                <span>📋</span>
+                                <span>{{ showDigestDetails ? 'Kuyruğu Gizle' : 'Kuyruk Detayları (' + (digestStats?.recent_items?.length || 0) + ')' }}</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                @click="triggerMorningDigest"
+                                :disabled="sendingDigest || (digestStats?.pending_count === 0)"
+                                class="px-5 py-2.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <svg v-if="sendingDigest" class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                </svg>
+                                <span>⚡ Sabah Özetini Şimdi Gönder</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Mini KPI Kartları -->
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5">
+                        <div class="bg-white/90 p-3.5 rounded-xl border border-amber-100 shadow-sm">
+                            <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Kuyrukta Bekleyen</div>
+                            <div class="text-2xl font-black mt-1" :class="digestStats?.pending_count > 0 ? 'text-amber-600' : 'text-gray-900'">
+                                {{ digestStats?.pending_count || 0 }} <span class="text-xs font-normal text-gray-500">bildirim</span>
+                            </div>
+                        </div>
+                        <div class="bg-white/90 p-3.5 rounded-xl border border-amber-100 shadow-sm">
+                            <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Bugün İletilen</div>
+                            <div class="text-2xl font-black text-green-600 mt-1">
+                                {{ digestStats?.sent_today_count || 0 }} <span class="text-xs font-normal text-gray-500">özet</span>
+                            </div>
+                        </div>
+                        <div class="bg-white/90 p-3.5 rounded-xl border border-amber-100 shadow-sm">
+                            <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Planlanan Saat</div>
+                            <div class="text-2xl font-black text-indigo-600 mt-1">
+                                08:30 <span class="text-xs font-normal text-gray-500">Hafta İçi</span>
+                            </div>
+                        </div>
+                        <div class="bg-white/90 p-3.5 rounded-xl border border-amber-100 shadow-sm">
+                            <div class="text-xs font-bold text-gray-500 uppercase tracking-wider">Korumalı Olaylar</div>
+                            <div class="text-sm font-bold text-gray-800 mt-2 flex items-center gap-1">
+                                <span class="text-xs">🚨 SLA</span>
+                                <span class="text-xs">⏱️ Timer</span>
+                                <span class="text-xs">⏳ Termin</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Açılır Kuyruk Tablosu -->
+                    <div v-if="showDigestDetails" class="mt-5 bg-white rounded-xl border border-amber-200 overflow-hidden shadow-sm">
+                        <div class="p-3 bg-amber-50/50 border-b border-amber-100 flex items-center justify-between">
+                            <span class="text-xs font-bold text-amber-900 uppercase tracking-wider">Mesai Dışı Bildirim Kuyruğu (Son Kayıtlar)</span>
+                            <span class="text-xs text-gray-500">MailGuard tarafından yakalanıp sabah bültenine eklenen kayıtlar</span>
+                        </div>
+                        <div v-if="!digestStats?.recent_items?.length" class="p-6 text-center text-xs text-gray-500">
+                            Kuyrukta henüz kayıt bulunmamaktadır.
+                        </div>
+                        <div v-else class="overflow-x-auto max-h-72">
+                            <table class="min-w-full text-left text-xs">
+                                <thead class="bg-gray-50 text-gray-600 font-bold border-b border-gray-200 sticky top-0">
+                                    <tr>
+                                        <th class="py-2.5 px-3">Durum</th>
+                                        <th class="py-2.5 px-3">Olay Kodu</th>
+                                        <th class="py-2.5 px-3">Hedef Alıcı</th>
+                                        <th class="py-2.5 px-3">Konu</th>
+                                        <th class="py-2.5 px-3">Kuyruğa Alınma</th>
+                                        <th class="py-2.5 px-3">İletilme Tarihi</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100 text-gray-700">
+                                    <tr v-for="item in digestStats.recent_items" :key="item.id" class="hover:bg-amber-50/30">
+                                        <td class="py-2 px-3">
+                                            <span 
+                                                class="px-2 py-0.5 rounded-full font-bold text-[10px]"
+                                                :class="item.status === 'pending' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'"
+                                            >
+                                                {{ item.status === 'pending' ? '⏳ Bekliyor' : '✅ İletildi' }}
+                                            </span>
+                                        </td>
+                                        <td class="py-2 px-3 font-mono font-semibold text-gray-800">
+                                            {{ item.event_code }}
+                                        </td>
+                                        <td class="py-2 px-3 font-medium">
+                                            {{ item.recipient_user?.name || item.recipient_email }}
+                                        </td>
+                                        <td class="py-2 px-3 truncate max-w-xs font-medium text-gray-900" :title="item.subject">
+                                            {{ item.subject }}
+                                        </td>
+                                        <td class="py-2 px-3 text-gray-500 font-mono">
+                                            {{ item.queued_at ? new Date(item.queued_at).toLocaleString('tr-TR') : '-' }}
+                                        </td>
+                                        <td class="py-2 px-3 text-gray-500 font-mono">
+                                            {{ item.sent_at ? new Date(item.sent_at).toLocaleString('tr-TR') : '-' }}
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- SECTION 2: EVENT & RULE MANAGEMENT -->

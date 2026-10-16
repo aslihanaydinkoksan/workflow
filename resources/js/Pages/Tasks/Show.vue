@@ -29,7 +29,31 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    documents: {
+        type: Array,
+        default: () => [],
+    },
+    budgetControl: {
+        type: Object,
+        default: () => ({ has_budget_impact: false }),
+    },
+    leadTimeAnalytics: {
+        type: Object,
+        default: () => null,
+    },
 });
+
+// Yan Yana Belge / Fatura Önizleyici (Split-Screen Viewer)
+const isSplitViewOpen = ref(false);
+const activeDocumentIndex = ref(0);
+const activeDocument = computed(() => {
+    if (!props.documents || props.documents.length === 0) return null;
+    return props.documents[activeDocumentIndex.value] || props.documents[0];
+});
+
+const toggleSplitView = () => {
+    isSplitViewOpen.value = !isSplitViewOpen.value;
+};
 
 const isRevision = computed(() => {
     return !!(
@@ -392,6 +416,26 @@ const formatDate = (value) => {
                 </div>
 
                 <div class="flex items-center gap-2 shrink-0">
+                    <!-- Yan Yana Belge / Fatura Önizleme Butonu (Item C) -->
+                    <button
+                        v-if="documents && documents.length > 0"
+                        type="button"
+                        @click="toggleSplitView"
+                        :class="[
+                            'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer',
+                            isSplitViewOpen 
+                                ? 'bg-purple-600 text-white shadow-purple-200' 
+                                : 'bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100'
+                        ]"
+                        title="Faturayı veya eki yan panelde açarak formu aynı anda doldurun"
+                    >
+                        <span>📄</span>
+                        <span>{{ isSplitViewOpen ? 'Tek Panele Dön' : 'Yan Yana Belge Önizle' }}</span>
+                        <span class="px-1.5 py-0.2 rounded-full text-[10px]" :class="isSplitViewOpen ? 'bg-purple-800 text-white' : 'bg-purple-200 text-purple-800'">
+                            {{ documents.length }}
+                        </span>
+                    </button>
+
                     <Link
                         :href="route('processes.tracker', task.process_instance_id)"
                         class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 shadow-sm transition-colors"
@@ -411,7 +455,67 @@ const formatDate = (value) => {
         </template>
 
         <div class="py-12">
-            <div class="max-w-4xl mx-auto sm:px-6 lg:px-8 space-y-6">
+            <div :class="[isSplitViewOpen ? 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8' : 'max-w-4xl mx-auto sm:px-6 lg:px-8']">
+                <div :class="[isSplitViewOpen ? 'lg:grid lg:grid-cols-12 lg:gap-8 items-start' : 'space-y-6']">
+                    
+                    <!-- SOL KOLON (FORM VE ONAY İŞLEMLERİ) -->
+                    <div :class="[isSplitViewOpen ? 'lg:col-span-7 space-y-6' : 'space-y-6']">
+
+                        <!-- KURUMSAL BÜTÇE & MASRAF MERKEZİ KONTROL PANELİ (Item D) -->
+                        <div 
+                            v-if="budgetControl && budgetControl.has_budget_impact" 
+                            class="rounded-2xl border p-4.5 shadow-sm transition-all"
+                            :class="[
+                                budgetControl.status === 'critical' 
+                                    ? 'bg-rose-50/70 border-rose-200' 
+                                    : (budgetControl.status === 'warning' 
+                                        ? 'bg-amber-50/70 border-amber-200' 
+                                        : 'bg-emerald-50/70 border-emerald-200')
+                            ]"
+                        >
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center gap-2.5">
+                                    <div :class="['w-9 h-9 rounded-xl flex items-center justify-center text-lg shadow-xs', budgetControl.badge_color]">
+                                        💳
+                                    </div>
+                                    <div>
+                                        <div class="flex items-center gap-2">
+                                            <h4 class="font-bold text-sm text-gray-900">Kurumsal Bütçe & Masraf Merkezi Kontrolü</h4>
+                                            <span :class="['text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border', budgetControl.badge_color]">
+                                                {{ budgetControl.status_label }}
+                                            </span>
+                                        </div>
+                                        <span class="text-xs text-gray-500">
+                                            Masraf Merkezi: <strong>{{ budgetControl.cost_center }}</strong> · Dönem: {{ budgetControl.fiscal_period }}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div class="text-right">
+                                    <span class="text-xs text-gray-500 block">Talep Edilen Tutar</span>
+                                    <span class="text-base font-black text-gray-900">{{ budgetControl.amount_formatted }}</span>
+                                </div>
+                            </div>
+
+                            <!-- Progress Bar -->
+                            <div class="space-y-1.5">
+                                <div class="flex items-center justify-between text-xs font-semibold text-gray-700">
+                                    <span>Dönem Bütçesi: {{ budgetControl.allocated_budget_formatted }}</span>
+                                    <span>Yeni Tüketim Oranı: %{{ budgetControl.consumption_rate }}</span>
+                                </div>
+                                <div class="w-full bg-gray-200/80 rounded-full h-3 overflow-hidden shadow-inner flex">
+                                    <div 
+                                        :class="budgetControl.bar_color" 
+                                        class="h-full rounded-full transition-all duration-500"
+                                        :style="{ width: Math.min(100, budgetControl.consumption_rate) + '%' }"
+                                    ></div>
+                                </div>
+                                <div class="flex items-center justify-between text-[11px] text-gray-500 pt-0.5">
+                                    <span>Önceki Harcama: {{ budgetControl.base_consumed_formatted }} (%{{ budgetControl.previous_rate }})</span>
+                                    <span>Kalan Kullanılabilir: <strong class="text-gray-800">{{ budgetControl.remaining_budget_formatted }}</strong></span>
+                                </div>
+                            </div>
+                        </div>
 
                 <!-- AKILLI GÖREV ODAKLAYICI & ADIM REHBERİ (SMART TASK SPOTLIGHT BANNER) -->
                 <div v-if="task.status === 'pending'" class="relative overflow-hidden rounded-2xl border border-indigo-200/80 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-5 text-white shadow-xl shadow-indigo-950/20">
@@ -904,10 +1008,97 @@ const formatDate = (value) => {
                                 </button>
                             </div>
                         </div>
-
                     </div>
                 </div>
+            </div> <!-- End Sol Kolon -->
 
+                    <!-- SAĞ KOLON: BÖLÜNMÜŞ EKRANDA CANLI BELGE / FATURA ÖNİZLEYİCİ (Item C) -->
+                    <div v-if="isSplitViewOpen && documents && documents.length > 0" class="lg:col-span-5 sticky top-6 space-y-4">
+                        <div class="bg-white rounded-2xl border border-purple-200 shadow-xl overflow-hidden flex flex-col">
+                            <!-- Header -->
+                            <div class="p-4 bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white flex items-center justify-between">
+                                <div class="flex items-center gap-2.5">
+                                    <div class="w-8 h-8 rounded-lg bg-purple-500/30 flex items-center justify-center text-lg shadow-xs">
+                                        📄
+                                    </div>
+                                    <div>
+                                        <h4 class="font-extrabold text-sm leading-tight text-white">Belge & Fatura Önizleyici</h4>
+                                        <span class="text-[11px] text-purple-200">Yan Yana Canlı İnceleme</span>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <a 
+                                        v-if="activeDocument" 
+                                        :href="activeDocument.url" 
+                                        target="_blank" 
+                                        class="px-2.5 py-1 text-xs bg-white/10 hover:bg-white/20 rounded-lg text-white font-bold transition flex items-center gap-1" 
+                                        title="Ayrı Sekmede Aç"
+                                    >
+                                        <span>↗️</span>
+                                        <span>Ayrı Sekme</span>
+                                    </a>
+                                    <button 
+                                        type="button" 
+                                        @click="isSplitViewOpen = false" 
+                                        class="p-1.5 text-xs bg-white/10 hover:bg-white/20 rounded-lg text-white font-bold cursor-pointer" 
+                                        title="Kapat"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Document Tabs -->
+                            <div class="px-3 py-2 bg-purple-50/80 border-b border-purple-100 flex items-center gap-1.5 overflow-x-auto text-xs">
+                                <button
+                                    v-for="(doc, idx) in documents"
+                                    :key="doc.id"
+                                    type="button"
+                                    @click="activeDocumentIndex = idx"
+                                    :class="[
+                                        'px-3 py-1.5 rounded-lg font-bold text-xs shrink-0 flex items-center gap-1.5 transition-all cursor-pointer',
+                                        activeDocumentIndex === idx 
+                                            ? 'bg-purple-700 text-white shadow-xs' 
+                                            : 'bg-white text-purple-900 hover:bg-purple-100 border border-purple-200'
+                                    ]"
+                                >
+                                    <span>{{ doc.icon || '📄' }}</span>
+                                    <span class="truncate max-w-[130px]">{{ doc.title }}</span>
+                                </button>
+                            </div>
+
+                            <!-- Document Preview Window -->
+                            <div class="p-3 bg-slate-900/5 min-h-[580px] max-h-[750px] flex items-center justify-center overflow-auto">
+                                <iframe 
+                                    v-if="activeDocument && (activeDocument.type === 'pdf' || activeDocument.url.endsWith('.pdf'))" 
+                                    :src="activeDocument.url" 
+                                    class="w-full h-[640px] rounded-xl border border-slate-300 bg-white shadow-inner"
+                                ></iframe>
+                                <div 
+                                    v-else-if="activeDocument && (activeDocument.type === 'image' || activeDocument.type === 'file')" 
+                                    class="p-4 text-center w-full"
+                                >
+                                    <img 
+                                        :src="activeDocument.url" 
+                                        alt="Belge" 
+                                        class="max-h-[600px] max-w-full mx-auto rounded-xl shadow-md border border-slate-200 object-contain" 
+                                    />
+                                </div>
+                                <div v-else class="text-center py-16 text-gray-400">
+                                    <span class="text-4xl block mb-2">📁</span>
+                                    <p class="text-xs">Önizlenecek belge seçilmedi.</p>
+                                </div>
+                            </div>
+
+                            <!-- Footer -->
+                            <div class="p-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+                                <span class="font-medium truncate">{{ activeDocument?.title }}</span>
+                                <span class="shrink-0 text-[11px] font-bold text-purple-700">{{ activeDocument?.badge }}</span>
+                            </div>
+                        </div>
+                    </div> <!-- End Sağ Kolon -->
+
+                </div>
             </div>
         </div>
 

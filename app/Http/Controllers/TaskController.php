@@ -84,12 +84,14 @@ class TaskController extends Controller
             'tasks'                => $tasks,
             'completedTasks'       => $completedTasks,
             'users'                => $users, // Yeni Prop
+            'all_users'            => User::where('is_active', true)->select('id', 'name')->orderBy('name')->get(),
             'given_delegations'    => $givenDelegations, // Yeni Prop
             'received_delegations' => $receivedDelegations, // Yeni Prop
             'pending_follow_ups'   => $pendingFollowUps,
             'active_workflows'     => $activeWorkflows,
             'workflow_categories'  => $allCategories,
         ]);
+
     }
 
     public function show(Task $task)
@@ -152,6 +154,10 @@ class TaskController extends Controller
 
         $previousTaskNotes = $this->getPreviousTaskNotesForTask($task);
 
+        $documents = $this->extractDocumentsForTask($task);
+        $leadTimeAnalytics = app(\App\Services\LeadTimeService::class)->analyzeProcess($task->processInstance);
+        $budgetControl = app(\App\Services\BudgetControlService::class)->evaluateBudget($task->processInstance);
+
         return Inertia::render('Tasks/Show', [
             'task' => $task,
             'nodeData' => $workflowNode,
@@ -162,7 +168,227 @@ class TaskController extends Controller
             'prefilledFormData' => $prefilledFormData,
             'fieldAudits' => app(\App\Services\ProcessAuditService::class)->getAuditsForInstance($task->processInstance),
             'appLogo' => \App\Models\Setting::where('key', 'app_logo')->value('value'),
+            'documents' => $documents,
+            'leadTimeAnalytics' => $leadTimeAnalytics,
+            'budgetControl' => $budgetControl,
         ]);
+    }
+
+    /**
+     * Çoklu Seçim & Toplu Karar Merkezi (Bulk Approve / Reject - SAP MyInbox Standardı)
+     */
+    public function bulkAction(Request $request, ProcessEngine $engine, TaskManager $manager)
+    {
+        /** @var User $user */
+        $user = Auth::user();
+
+        $validated = $request->validate([
+            'task_ids' => 'required|array|min:1',
+            'task_ids.*' => 'required|integer',
+            'action' => 'required|string|in:approve,reject',
+            'comment' => 'nullable|string|max:1000',
+        ]);
+
+        $taskIds = $validated['task_ids'];
+        $action = $validated['action'];
+        $comment = $validated['comment'] ?: ($action === 'approve' ? 'Toplu Onaylandı (Hızlı Karar Merkezi)' : 'Toplu Reddedildi');
+
+        $successCount = 0;
+        $skippedCount = 0;
+        $isAdmin = $user->hasRole('Admin') || $user->hasRole('superadmin');
+
+        foreach ($taskIds as $taskId) {
+            $task = Task::with('processInstance.workflow')->find($taskId);
+            if (!$task || $task->status !== 'pending' || $task->type !== 'approval') {
+                $skippedCount++;
+                continue;
+            }
+
+            if (!TaskVisibility::userCanAccessTask($user, $task)) {
+                $skippedCount++;
+                continue;
+            }
+
+            // 4-Göz SoD Koruması: Talep sahibi kendi onayını veremez
+            if ((int)$task->processInstance->started_by === $user->id && !$isAdmin) {
+                $skippedCount++;
+                continue;
+            }
+
+            try {
+                if ($action === 'approve') {
+                    $manager->completeTask($task, $comment, $user->id);
+                    $workflowNode = collect($task->processInstance->workflow->nodes ?? [])->firstWhere('id', $task->node_id);
+                    $approvalPolicy = $workflowNode['data']['approvalPolicy'] ?? 'any';
+                    
+                    $shouldAdvance = true;
+                    if ($approvalPolicy === 'all') {
+                        $hasPending = $manager->nodeHasPendingTasks($task->processInstance, $task->node_id);
+                        $shouldAdvance = !$hasPending;
+                    } else {
+                        $manager->cancelPendingTasksForNode($task->processInstance, $task->node_id, $task->id);
+                    }
+
+                    if ($shouldAdvance) {
+                        $instance = $task->processInstance->fresh();
+                        $instance->update(['current_node_id' => $task->node_id, 'status' => 'running']);
+                        $engine->onTaskCompleted($instance, 'approved', $comment, $task->node_id);
+                    }
+                } else {
+                    $manager->rejectTask($task, $comment, $user->id);
+                    $manager->cancelPendingTasksForNode($task->processInstance, $task->node_id, $task->id);
+                    $instance = $task->processInstance->fresh();
+                    $instance->update(['current_node_id' => $task->node_id, 'status' => 'running']);
+                    $engine->onTaskCompleted($instance, 'rejected', $comment, $task->node_id);
+                }
+
+                // Denetim İzi Kaydı
+                app(\App\Services\ProcessAuditService::class)->recordDiff(
+                    $task->processInstance,
+                    ['bulk_decision' => null],
+                    ['bulk_decision' => $action],
+                    $user->id,
+                    'bulk_' . $action,
+                    $task->id,
+                    $comment
+                );
+
+                $successCount++;
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error("Bulk action failed for task #{$taskId}: " . $e->getMessage());
+                $skippedCount++;
+            }
+        }
+
+        $actionWord = $action === 'approve' ? 'onaylandı' : 'reddedildi';
+        $msg = "{$successCount} adet onay görevi başarıyla toplu {$actionWord}.";
+        if ($skippedCount > 0) {
+            $msg .= " ({$skippedCount} görev yetki veya kural kısıtı nedeniyle atlandı.)";
+        }
+
+        return back()->with('success', $msg);
+    }
+
+    /**
+     * Görev veya süreçle ilgili fatura, ek, resim ve resmi PDF belgelerini ayıklar.
+     */
+    private function extractDocumentsForTask(Task $task): array
+    {
+        $docs = [];
+        $instance = $task->processInstance;
+        $workflowName = mb_strtolower($instance->workflow->name ?? '', 'UTF-8');
+        $instanceData = (array) ($instance->data ?? []);
+
+        // 1. Resmi Dış Görev & Seyahat İzin Belgesi PDF
+        if (str_contains($workflowName, 'dış görev') || str_contains($workflowName, 'seyahat') || str_contains($workflowName, 'harcırah')) {
+            $docs[] = [
+                'id' => 'travel_order_pdf',
+                'title' => 'Resmi Dış Görevlendirme ve Seyahat İzin Belgesi',
+                'badge' => 'Köksan Onaylı İzin Belgesi (PDF)',
+                'type' => 'pdf',
+                'url' => route('processes.travel-order', $instance->id),
+                'icon' => '📄',
+                'is_primary' => true,
+            ];
+        }
+
+        // 2. Numune Analiz Sertifikası (CoA PDF)
+        if (str_contains($workflowName, 'numune') || str_contains($workflowName, 'levha') || str_contains($workflowName, 'coa')) {
+            $docs[] = [
+                'id' => 'coa_certificate_pdf',
+                'title' => 'Teknik Analiz Sertifikası (CoA)',
+                'badge' => 'Laboratuvar Kalite Belgesi (PDF)',
+                'type' => 'pdf',
+                'url' => route('processes.certificate', $instance->id),
+                'icon' => '🔬',
+                'is_primary' => empty($docs),
+            ];
+        }
+
+        // 3. Makine Arıza & Bakım Onarım İş Emri Fişi (TPM PDF)
+        if (str_contains($workflowName, 'bakım') || str_contains($workflowName, 'tpm') || str_contains($workflowName, 'arıza')) {
+            $docs[] = [
+                'id' => 'maintenance_order_pdf',
+                'title' => 'Makine Bakım Onarım İş Emri Fişi',
+                'badge' => 'TPM & Bakım Belgesi (PDF)',
+                'type' => 'pdf',
+                'url' => route('processes.maintenance-order', $instance->id),
+                'icon' => '🛠️',
+                'is_primary' => empty($docs),
+            ];
+        }
+
+        // 4. DÖF / 8D Kalite Raporu PDF
+        if (str_contains($workflowName, 'döf') || str_contains($workflowName, 'dof') || str_contains($workflowName, 'kalite') || str_contains($workflowName, 'capa') || str_contains($workflowName, '8d')) {
+            $docs[] = [
+                'id' => 'dof_report_pdf',
+                'title' => 'Resmi DÖF / 8D Kalite Raporu',
+                'badge' => 'ISO 9001 Kalite Güvence (PDF)',
+                'type' => 'pdf',
+                'url' => route('processes.dof-report', $instance->id),
+                'icon' => '🔬',
+                'is_primary' => empty($docs),
+            ];
+        }
+
+        // 5. Malzeme Satın Alma Talep Fişi PDF
+        if (str_contains($workflowName, 'satın alma') || str_contains($workflowName, 'malzeme')) {
+            $docs[] = [
+                'id' => 'purchase_order_pdf',
+                'title' => 'Malzeme Satın Alma Talep Fişi',
+                'badge' => 'Kurumsal Satın Alma Onayı (PDF)',
+                'type' => 'pdf',
+                'url' => route('processes.purchase-order', $instance->id),
+                'icon' => '🛒',
+                'is_primary' => empty($docs),
+            ];
+        }
+
+        // 6. Form Verisi İçindeki Ek Belgeler / Faturalar
+        $fileKeys = ['fatura', 'bilet', 'otel', 'dekont', 'ek_dosya', 'dosya', 'file', 'attachment', 'belge', 'makbuz'];
+        foreach ($instanceData as $key => $val) {
+            if (empty($val)) continue;
+
+            $isMatch = false;
+            foreach ($fileKeys as $fk) {
+                if (str_contains($key, $fk)) {
+                    $isMatch = true;
+                    break;
+                }
+            }
+
+            if ($isMatch || (is_string($val) && preg_match('/\.(pdf|jpg|jpeg|png|webp|xlsx|xls)$/i', $val))) {
+                $ext = pathinfo((string)$val, PATHINFO_EXTENSION);
+                $isPdf = strtolower($ext) === 'pdf';
+                $isImg = in_array(strtolower($ext), ['jpg', 'jpeg', 'png', 'webp'], true);
+                
+                $title = ucwords(str_replace('_', ' ', $key));
+                $fileUrl = str_starts_with((string)$val, 'http') ? $val : (str_starts_with((string)$val, '/storage') ? $val : '/storage/' . ltrim((string)$val, '/'));
+
+                $docs[] = [
+                    'id' => 'uploaded_' . $key,
+                    'title' => $title,
+                    'badge' => strtoupper($ext ?: 'DOSYA') . ' Eki',
+                    'type' => $isPdf ? 'pdf' : ($isImg ? 'image' : 'file'),
+                    'url' => $fileUrl,
+                    'icon' => $isPdf ? '📑' : ($isImg ? '🖼️' : '📎'),
+                    'is_primary' => empty($docs),
+                ];
+            }
+        }
+
+        // 4. Görev Rapor Form Dökümü (Her halükarda hazır resmi döküm)
+        $docs[] = [
+            'id' => 'task_summary_pdf',
+            'title' => 'Görev Form Resmi Dökümü #' . $task->id,
+            'badge' => 'Canlı Form Çıktısı (PDF)',
+            'type' => 'pdf',
+            'url' => route('tasks.export.pdf', $task->id),
+            'icon' => '📋',
+            'is_primary' => empty($docs),
+        ];
+
+        return $docs;
     }
 
     public function update(Request $request, Task $task, ProcessEngine $engine, TaskManager $manager)
@@ -590,8 +816,14 @@ class TaskController extends Controller
             return [];
         }
 
+        $extraIds = [];
+        foreach ($fieldIds as $fId) {
+            $extraIds[] = $fId . '_note';
+        }
+        $allIds = array_merge($fieldIds, $extraIds);
+
         return collect($instanceData)
-            ->only($fieldIds)
+            ->only($allIds)
             ->filter(fn($value) => $value !== null && $value !== '')
             ->all();
     }
@@ -675,8 +907,12 @@ class TaskController extends Controller
         $elements = $subForm->schema ?? [];
         $formattedFormData = [];
         foreach ($elements as $el) {
-            $formattedFormData[$el['id']] = $this->formatFieldValueForExport($formData[$el['id']] ?? null);
+            $note = $formData[$el['id'] . '_note'] ?? null;
+            $formattedFormData[$el['id']] = $this->formatFieldValueForExport($formData[$el['id']] ?? null, $note);
         }
+
+        $paperSize = ($subForm->paper_size === 'a5') ? 'a5' : 'a4';
+        $logoBase64 = \App\Services\CertificateGenerator::getLogoBase64();
 
         $pdf = Pdf::loadView('pdf.task-detail', [
             'templateName' => $subForm->name,
@@ -685,9 +921,13 @@ class TaskController extends Controller
             'publishDate'  => $subForm->publish_date,
             'revisionNo'   => $subForm->revision_no,
             'revisionDate' => $subForm->revision_date,
+            'pageNo'       => $subForm->page_no ?? 1,
+            'paperSize'    => $paperSize,
+            'logoBase64'   => $logoBase64,
             'elements'     => $elements,
             'formData'     => $formattedFormData,
-        ]);
+            'rawFormData'  => $formData,
+        ])->setPaper($paperSize, 'portrait');
 
         $fileName = Str::slug($subForm->name) . '-' . $task->id . '.pdf';
         return $pdf->download($fileName);
@@ -723,7 +963,8 @@ class TaskController extends Controller
         foreach ($elements as $el) {
             if ($el['type'] === 'header') continue;
 
-            $excelData[$el['label']] = $this->formatFieldValueForExport($formData[$el['id']] ?? null);
+            $note = $formData[$el['id'] . '_note'] ?? null;
+            $excelData[$el['label']] = $this->formatFieldValueForExport($formData[$el['id']] ?? null, $note);
         }
 
         $fileName = Str::slug($subForm->name) . '-' . $task->id . '.xlsx';
@@ -751,14 +992,18 @@ class TaskController extends Controller
         return $pdf->download($fileName);
     }
 
-    private function formatFieldValueForExport($val): string
+    private function formatFieldValueForExport($val, ?string $note = null): string
     {
         if (is_null($val) || $val === '') {
             return '-';
         }
 
         if (is_bool($val)) {
-            return $val ? 'Evet' : 'Hayır';
+            $text = $val ? 'Evet' : 'Hayır';
+            if (!empty($note)) {
+                $text .= ' (Not: ' . $note . ')';
+            }
+            return $text;
         }
 
         if (is_array($val)) {
@@ -778,6 +1023,12 @@ class TaskController extends Controller
                     $date .= ' (Not: ' . $val['note'] . ')';
                 }
                 return empty($date) ? '-' : $date;
+            }
+
+            if (isset($val['decision'])) {
+                $dec = $val['decision'];
+                $n = $val['note'] ?? $note ?? '';
+                return !empty($n) ? "{$dec} (Not: {$n})" : (string)$dec;
             }
 
             $items = [];
@@ -803,6 +1054,148 @@ class TaskController extends Controller
             return empty($items) ? '-' : implode('; ', $items);
         }
 
-        return (string)$val;
+        $res = (string)$val;
+        if (!empty($note)) {
+            $res .= ' (Not: ' . $note . ')';
+        }
+        return $res;
+    }
+
+    /**
+     * Yönetici Görev Düzenleme (Admin Edit)
+     */
+    public function adminUpdate(Request $request, Task $task, \App\Services\ProcessAuditService $auditService)
+    {
+        $user = $request->user() ?? auth()->user();
+        if (!$user || (!$user->can('tasks.admin_edit') && !$user->hasRole('Admin') && !$user->hasRole('superadmin'))) {
+            abort(403, 'Görevi yönetici olarak düzenleme yetkiniz bulunmamaktadır.');
+        }
+
+        $validated = $request->validate([
+            'assigned_to' => 'nullable|exists:users,id',
+            'due_date' => 'nullable|date',
+            'status' => 'nullable|in:pending,completed,cancelled',
+            'comment' => 'nullable|string|max:1000',
+        ]);
+
+        $instance = $task->processInstance;
+        $changes = [];
+
+        if (array_key_exists('assigned_to', $validated) && $validated['assigned_to'] != $task->assigned_to) {
+            $oldUser = User::find($task->assigned_to)?->name ?? 'Atanmamış';
+            $newUser = User::find($validated['assigned_to'])?->name ?? 'Atanmamış';
+            $changes[] = "Atanan: {$oldUser} -> {$newUser}";
+            $task->assigned_to = $validated['assigned_to'];
+        }
+
+        if (array_key_exists('due_date', $validated)) {
+            $newDue = $validated['due_date'] ? \Carbon\Carbon::parse($validated['due_date']) : null;
+            $oldDueStr = $task->due_date ? $task->due_date->format('d.m.Y H:i') : 'Yok';
+            $newDueStr = $newDue ? $newDue->format('d.m.Y H:i') : 'Yok';
+            if ($oldDueStr !== $newDueStr) {
+                $changes[] = "Vade: {$oldDueStr} -> {$newDueStr}";
+                $task->due_date = $newDue;
+            }
+        }
+
+        if (array_key_exists('status', $validated) && $validated['status'] !== $task->status) {
+            $changes[] = "Durum: {$task->status} -> {$validated['status']}";
+            $task->status = $validated['status'];
+            if ($validated['status'] === 'completed' && !$task->completed_at) {
+                $task->completed_at = now();
+                $task->completed_by = $user->id;
+            }
+        }
+
+        if (!empty($validated['comment'])) {
+            $task->comment = $validated['comment'];
+        }
+
+        $task->save();
+
+        if ($instance && !empty($changes)) {
+            $auditService->recordAdminIntervention(
+                $instance,
+                'admin_task_edit',
+                $user->id,
+                'Görev Yönetici Güncellemesi',
+                null,
+                implode(', ', $changes),
+                $validated['comment'] ?? 'Yönetici tarafından güncellendi',
+                $task->id
+            );
+        }
+
+        return back()->with('success', "Görev (#{$task->id}) yönetici tarafından başarıyla güncellendi.");
+    }
+
+    /**
+     * Yönetici Görev & Süreç Silme (Admin Soft Delete)
+     */
+    public function adminDestroy(Request $request, Task $task, \App\Services\ProcessAuditService $auditService)
+    {
+        $user = $request->user() ?? auth()->user();
+        if (!$user || (!$user->can('tasks.admin_delete') && !$user->hasRole('Admin') && !$user->hasRole('superadmin'))) {
+            abort(403, 'Görev veya süreç silme yetkiniz bulunmamaktadır.');
+        }
+
+        $scope = $request->input('delete_scope', 'process'); // 'process' | 'task'
+        $instance = $task->processInstance;
+
+        if ($scope === 'process' && $instance) {
+            // Süreç ve bağlı tüm görevleri soft-delete yap
+            $taskCount = $instance->tasks()->count();
+            $instance->tasks()->delete(); // Soft delete all tasks
+            $instance->delete(); // Soft delete process instance
+
+            return back()->with('success', "Test süreci (#{$instance->id} - {$instance->workflow?->name}) ve bağlı {$taskCount} adet görevi güvenle arşivlendi (Soft Delete).");
+        } else {
+            // Yalnızca tek görevi soft-delete yap
+            $task->delete();
+            return back()->with('success', "Görev (#{$task->id}) güvenle arşivlendi (Soft Delete).");
+        }
+    }
+
+    /**
+     * Yönetici Toplu Görev & Süreç Silme (Admin Bulk Soft Delete)
+     */
+    public function adminBulkDestroy(Request $request)
+    {
+        $user = $request->user() ?? auth()->user();
+        if (!$user || (!$user->can('tasks.admin_bulk_delete') && !$user->hasRole('Admin') && !$user->hasRole('superadmin'))) {
+            abort(403, 'Toplu görev veya süreç silme yetkiniz bulunmamaktadır.');
+        }
+
+        $validated = $request->validate([
+            'task_ids' => 'required|array|min:1',
+            'task_ids.*' => 'integer',
+            'delete_scope' => 'nullable|in:process,task',
+        ]);
+
+        $scope = $validated['delete_scope'] ?? 'process';
+        $tasks = Task::whereIn('id', $validated['task_ids'])->with('processInstance.workflow')->get();
+        $deletedProcesses = [];
+        $deletedTasksCount = 0;
+
+        foreach ($tasks as $task) {
+            if ($scope === 'process' && $task->processInstance) {
+                $pId = $task->process_instance_id;
+                if (!isset($deletedProcesses[$pId])) {
+                    $task->processInstance->tasks()->delete();
+                    $task->processInstance->delete();
+                    $deletedProcesses[$pId] = true;
+                }
+            } else {
+                $task->delete();
+            }
+            $deletedTasksCount++;
+        }
+
+        $msg = $scope === 'process'
+            ? count($deletedProcesses) . " adet test süreci ve bağlı görevleri başarıyla arşivlendi (Soft Delete)."
+            : "{$deletedTasksCount} adet görev başarıyla arşivlendi (Soft Delete).";
+
+        return back()->with('success', $msg);
     }
 }
+

@@ -21,6 +21,7 @@ class FormTemplate extends Model
         'revision_no',
         'revision_date',
         'page_no',
+        'paper_size',
         'logo_width',
         'logo_height'
     ];

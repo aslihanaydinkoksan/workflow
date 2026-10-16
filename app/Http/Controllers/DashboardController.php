@@ -73,6 +73,29 @@ class DashboardController extends Controller
             ];
         }
 
+        // 6. Ana Sayfaya Sabitlenen Rapor & BI Widget'ları (Power BI Panosu)
+        $pinnedWidgetModels = \App\Models\ReportWidget::where('is_active', true)
+            ->where('is_pinned_to_home', true)
+            ->latest('id')
+            ->take(4)
+            ->get();
+
+        $pinnedWidgets = [];
+        if ($pinnedWidgetModels->isNotEmpty()) {
+            $queryEngine = app(\App\Services\ReportQueryEngineService::class);
+            foreach ($pinnedWidgetModels as $w) {
+                try {
+                    $result = $queryEngine->executeQuery($w, ['date_range' => 'all_time']);
+                    $pinnedWidgets[] = [
+                        'widget' => $w,
+                        'result' => $result,
+                    ];
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning("Pinned widget query failed: " . $e->getMessage());
+                }
+            }
+        }
+
         $stats = [
             'is_admin'                 => $isAdminOrGM,
             'pending_tasks_count'      => $pendingTasksCount,
@@ -84,11 +107,14 @@ class DashboardController extends Controller
             'my_recent_processes'      => $myRecentProcesses,
             'quick_workflows'          => $quickWorkflows,
             'admin_stats'              => $adminStats,
+            'pinned_widgets'           => $pinnedWidgets,
         ];
 
         return Inertia::render('Dashboard', [
-            'stats' => $stats,
-            'user'  => $user
+            'stats'     => $stats,
+            'user'      => $user,
+            'all_users' => User::where('is_active', true)->select('id', 'name')->orderBy('name')->get(),
         ]);
     }
 }
+

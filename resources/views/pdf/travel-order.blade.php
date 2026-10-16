@@ -122,28 +122,137 @@
             color: #64748b;
             line-height: 1.3;
         }
+        /* 1. KÖKSAN RESMİ 3'LÜ ANTET ÇERÇEVESİ */
+        .header-frame {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1.5px solid #1e293b;
+            margin-bottom: 12px;
+        }
+        .header-frame td {
+            vertical-align: middle;
+            border: 1.5px solid #1e293b;
+        }
+        .header-logo-cell {
+            width: 25%;
+            padding: 6px 8px;
+            text-align: center;
+            background-color: #ffffff;
+        }
+        .header-logo-cell img {
+            max-height: 48px;
+            max-width: 175px;
+            display: inline-block;
+        }
+        .header-logo-fallback {
+            font-size: 16px;
+            font-weight: bold;
+            color: #003366;
+            letter-spacing: 1px;
+        }
+        .header-logo-sub {
+            font-size: 7.5px;
+            color: #64748b;
+        }
+        .header-title-cell {
+            width: 47%;
+            padding: 8px 10px;
+            text-align: center;
+            background-color: #f8fafc;
+        }
+        .header-doc-title {
+            font-size: 13px;
+            font-weight: bold;
+            color: #003366;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            line-height: 1.3;
+        }
+        .header-doc-subtitle {
+            font-size: 8.5px;
+            color: #475569;
+            font-weight: normal;
+            margin-top: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .header-control-cell {
+            width: 28%;
+            padding: 0;
+            background-color: #ffffff;
+        }
+        .control-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .control-table td {
+            padding: 3px 6px;
+            font-size: 8.5px;
+            border: none;
+            border-bottom: 1px solid #cbd5e1;
+        }
+        .control-table tr:last-child td {
+            border-bottom: none;
+        }
+        .control-lbl {
+            font-weight: bold;
+            color: #334155;
+            background-color: #f1f5f9;
+            width: 52%;
+            border-right: 1px solid #cbd5e1 !important;
+        }
+        .control-val {
+            color: #0f172a;
+            font-weight: bold;
+            text-align: center;
+            width: 48%;
+        }
     </style>
 </head>
 <body>
 
-    <!-- Üst Başlık -->
-    <table class="header-table">
+    <!-- Üst Başlık (Köksan Kalite Standart Anteti) -->
+    <table class="header-frame">
         <tr>
-            <td style="width: 65%;">
-                <div class="company-title">KÖKSAN PET VE PLASTİK AMBALAJ SAN. A.Ş.</div>
-                <div class="company-subtitle">İnsan Kaynakları & İdari İşler Direktörlüğü</div>
+            <!-- SOL: KÖKSAN KURUMSAL AMBLEM & LOGO -->
+            <td class="header-logo-cell">
+                @if(!empty($logoBase64))
+                    <img src="{{ $logoBase64 }}" alt="KÖKSAN" />
+                @else
+                    <div class="header-logo-fallback">KÖKSAN</div>
+                    <div class="header-logo-sub">PET VE PLASTİK AMBALAJ SAN. VE TİC. A.Ş.</div>
+                @endif
             </td>
-            <td style="width: 35%; text-align: right;">
-                <div style="font-size: 11px; font-weight: bold; color: #003366;">FORM NO: FR-IDR-008</div>
-                <div style="font-size: 9px; color: #64748b;">Belge No: {{ $orderNo }}</div>
-                <div style="font-size: 9px; color: #64748b;">Tarih: {{ $issueDate }}</div>
+
+            <!-- ORTA: DOKÜMAN / RAPOR BAŞLIĞI -->
+            <td class="header-title-cell">
+                <div class="header-doc-title">DIŞ GÖREVLENDİRME VE SEYAHAT İZİN BELGESİ</div>
+                <div class="header-doc-subtitle">OFFICIAL BUSINESS TRAVEL ORDER & PERMIT</div>
+            </td>
+
+            <!-- SAĞ: DOKÜMAN KONTROL VE KALİTE KÜNYESİ -->
+            <td class="header-control-cell">
+                <table class="control-table">
+                    <tr>
+                        <td class="control-lbl">Doküman No</td>
+                        <td class="control-val">{{ $documentNo ?? 'FR-IDR-008' }}</td>
+                    </tr>
+                    <tr>
+                        <td class="control-lbl">Yayın Tarihi</td>
+                        <td class="control-val">{{ $publishDate ?? '25.09.2026' }}</td>
+                    </tr>
+                    <tr>
+                        <td class="control-lbl">Revizyon No / Tarih</td>
+                        <td class="control-val">{{ $revisionInfo ?? '01 / 25.09.2026' }}</td>
+                    </tr>
+                    <tr>
+                        <td class="control-lbl">Sayfa No</td>
+                        <td class="control-val">{{ $pageNo ?? '1 / 1' }}</td>
+                    </tr>
+                </table>
             </td>
         </tr>
     </table>
-
-    <div class="doc-title">
-        DIŞ GÖREVLENDİRME VE SEYAHAT İZİN BELGESİ
-    </div>
 
     <!-- 1. Görev ve Personel Bilgileri -->
     <div class="section-header">1. GÖREV VE PERSONEL BİLGİLERİ</div>

@@ -347,6 +347,9 @@ class ProcessController extends Controller
             })->values()->all()
             : [];
 
+        $leadTimeAnalytics = app(\App\Services\LeadTimeService::class)->analyzeProcess($instance);
+        $budgetControl = app(\App\Services\BudgetControlService::class)->evaluateBudget($instance);
+
         return Inertia::render('Process/Tracker', [
             'instance' => $instance,
             'myPendingTask' => $myPendingTask,
@@ -363,6 +366,8 @@ class ProcessController extends Controller
             'isAdmin' => $isAdmin,
             'allUsers' => $allUsers,
             'workflowNodes' => $workflowNodes,
+            'leadTimeAnalytics' => $leadTimeAnalytics,
+            'budgetControl' => $budgetControl,
         ]);
     }
 
@@ -467,6 +472,72 @@ class ProcessController extends Controller
 
         $pdf = $generator->generate($instance);
         $fileName = 'Dis-Gorev-Belgesi-PI-' . $instance->id . '.pdf';
+
+        return $pdf->download($fileName);
+    }
+
+    public function exportMaintenanceOrder(ProcessInstance $instance, \App\Services\MaintenanceOrderGenerator $generator)
+    {
+        $user = Auth::user();
+        $isAdmin = $user->hasRole('Admin') || $user->hasRole('superadmin');
+
+        $isRelated = $isAdmin
+            || $instance->started_by === $user->id
+            || $instance->tasks()->where(function ($q) use ($user) {
+                $q->where('assigned_to', $user->id)
+                  ->orWhere('completed_by', $user->id);
+            })->exists();
+
+        if (!$isRelated) {
+            abort(403, 'Bu bakım iş emri belgesini görüntüleme yetkiniz bulunmamaktadır.');
+        }
+
+        $pdf = $generator->generate($instance);
+        $fileName = 'Bakim-Is-Emri-PI-' . $instance->id . '.pdf';
+
+        return $pdf->download($fileName);
+    }
+
+    public function exportDofReport(ProcessInstance $instance, \App\Services\DofReportGenerator $generator)
+    {
+        $user = Auth::user();
+        $isAdmin = $user->hasRole('Admin') || $user->hasRole('superadmin');
+
+        $isRelated = $isAdmin
+            || $instance->started_by === $user->id
+            || $instance->tasks()->where(function ($q) use ($user) {
+                $q->where('assigned_to', $user->id)
+                  ->orWhere('completed_by', $user->id);
+            })->exists();
+
+        if (!$isRelated) {
+            abort(403, 'Bu DÖF kalite raporunu görüntüleme yetkiniz bulunmamaktadır.');
+        }
+
+        $pdf = $generator->generate($instance);
+        $fileName = 'DOF-Kalite-Raporu-PI-' . $instance->id . '.pdf';
+
+        return $pdf->download($fileName);
+    }
+
+    public function exportPurchaseOrder(ProcessInstance $instance, \App\Services\PurchaseOrderGenerator $generator)
+    {
+        $user = Auth::user();
+        $isAdmin = $user->hasRole('Admin') || $user->hasRole('superadmin');
+
+        $isRelated = $isAdmin
+            || $instance->started_by === $user->id
+            || $instance->tasks()->where(function ($q) use ($user) {
+                $q->where('assigned_to', $user->id)
+                  ->orWhere('completed_by', $user->id);
+            })->exists();
+
+        if (!$isRelated) {
+            abort(403, 'Bu satın alma talep belgesini görüntüleme yetkiniz bulunmamaktadır.');
+        }
+
+        $pdf = $generator->generate($instance);
+        $fileName = 'Satin-Alma-Talep-PI-' . $instance->id . '.pdf';
 
         return $pdf->download($fileName);
     }

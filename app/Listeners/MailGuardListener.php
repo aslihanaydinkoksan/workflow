@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Listeners;
 
+use App\Models\MailDigestQueue;
 use App\Models\MailEvent;
 use App\Models\MailRule;
 use App\Models\MailSetting;
+use App\Models\User;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -43,6 +45,12 @@ class MailGuardListener
         // 2. ADIM: OLAY KODU EŞLEŞTİRME (EVENT MAPPING)
         $eventCode = $this->resolveEventCode($event, $message);
 
+        // Özel İstisna: morning_digest (Sabah Özeti) bülteni kural filtresine takılmadan iletilmelidir
+        if ($eventCode === 'morning_digest') {
+            $this->applyTestMode($message);
+            return true;
+        }
+
         // 3. ADIM: OLAY VE KURAL DEĞERLENDİRMESİ (RULE EVALUATION)
         if ($eventCode !== null) {
             $mailEvent = MailEvent::where('event_code', $eventCode)->with('activeRule')->first();
@@ -60,6 +68,9 @@ class MailGuardListener
 
                 // Olayın kuralı (Zaman ve Gün kısıtlaması) geçerli mi?
                 if ($mailEvent->activeRule && ! $this->evaluateRule($mailEvent->activeRule, $eventCode)) {
+                    // Mesai dışı / gün kısıtına takılan e-postaları Sabah Özeti (Morning Digest) kuyruğuna ekle
+                    $this->queueForMorningDigest($message, $eventCode, $event);
+
                     return false;
                 }
             }
@@ -217,5 +228,55 @@ class MailGuardListener
             'redirected_to' => $testRecipient,
             'final_subject' => $message->getSubject(),
         ]);
+    }
+
+    /**
+     * Mesai saatleri dışında düşen e-postaları sabah 08:30 özet bülteni (MailDigestQueue) kuyruğuna ekler.
+     */
+    protected function queueForMorningDigest(Email $message, string $eventCode, MessageSending $event): void
+    {
+        try {
+            $toAddresses = array_map(fn (Address $a) => $a->getAddress(), $message->getTo() ?? []);
+            $subject = (string) $message->getSubject();
+
+            // HTML veya düz metin içeriğini al
+            $body = $message->getTextBody() ?? strip_tags((string) $message->getHtmlBody());
+            if (empty(trim((string) $body))) {
+                $body = (string) $message->getHtmlBody();
+            }
+
+            // Olay ve bildirim verisinden ek meta bilgileri (task_id, process_id vb.) çıkar
+            $metadata = [];
+            if (isset($event->data['notification']) && is_object($event->data['notification'])) {
+                $notif = $event->data['notification'];
+                $metadata['task_id'] = $notif->task_id ?? ($notif->data['task_id'] ?? null);
+                $metadata['process_instance_id'] = $notif->data['process_instance_id'] ?? null;
+                $metadata['action_url'] = $notif->data['action_url'] ?? null;
+            }
+
+            foreach ($toAddresses as $email) {
+                // E-posta adresinden kullanıcıyı bul
+                $user = User::where('email', $email)->first();
+
+                MailDigestQueue::create([
+                    'recipient_email'   => $email,
+                    'recipient_user_id' => $user?->id,
+                    'event_code'        => $eventCode,
+                    'subject'           => $subject,
+                    'body'              => $body,
+                    'metadata'          => !empty($metadata) ? $metadata : null,
+                    'status'            => 'pending',
+                    'queued_at'         => now(),
+                ]);
+
+                Log::info("[MAIL GUARD DIGEST] E-posta mesai dışı olduğu için sabah 08:30 özet bültenine (MailDigestQueue) eklendi.", [
+                    'recipient'  => $email,
+                    'event_code' => $eventCode,
+                    'subject'    => $subject,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::error("[MAIL GUARD DIGEST] E-posta sabah özet kuyruğuna eklenirken hata: " . $e->getMessage());
+        }
     }
 }

@@ -62,9 +62,17 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    leadTimeAnalytics: {
+        type: Object,
+        default: () => null,
+    },
+    budgetControl: {
+        type: Object,
+        default: () => null,
+    },
 });
 
-// Aktif Sekme Yönetimi: 'details' (varsayılan) | 'flow' | 'history' | 'sla_history' | 'audits'
+// Aktif Sekme Yönetimi: 'details' (varsayılan) | 'flow' | 'history' | 'lead_time' | 'sla_history' | 'audits'
 const activeTab = ref('details');
 
 // Yönetici Müdahale Kokpiti State
@@ -228,7 +236,22 @@ const isTravelWorkflow = computed(() => {
 
 const isSampleWorkflow = computed(() => {
     const name = (props.instance.workflow?.name || '').toLocaleLowerCase('tr-TR');
-    return name.includes('numune') || name.includes('levha') || name.includes('kalite');
+    return (name.includes('numune') || name.includes('levha')) && !name.includes('döf');
+});
+
+const isMaintenanceWorkflow = computed(() => {
+    const name = (props.instance.workflow?.name || '').toLocaleLowerCase('tr-TR');
+    return name.includes('bakım') || name.includes('tpm') || name.includes('arıza');
+});
+
+const isDofWorkflow = computed(() => {
+    const name = (props.instance.workflow?.name || '').toLocaleLowerCase('tr-TR');
+    return name.includes('döf') || name.includes('dof') || name.includes('capa') || name.includes('8d');
+});
+
+const isPurchaseWorkflow = computed(() => {
+    const name = (props.instance.workflow?.name || '').toLocaleLowerCase('tr-TR');
+    return name.includes('satın alma') || name.includes('malzeme');
 });
 
 const isRevisionTask = computed(() => {
@@ -648,6 +671,36 @@ const submitReschedule = () => {
                         <span>📄</span> Dış Görev Belgesi (PDF)
                     </a>
 
+                    <a
+                        v-if="isMaintenanceWorkflow"
+                        :href="route('processes.maintenance-order', instance.id)"
+                        target="_blank"
+                        class="inline-flex items-center gap-1.5 rounded-xl bg-orange-600 px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-orange-700 transition-all transform hover:-translate-y-0.5"
+                        title="Resmi Makine Arıza & Bakım İş Emrini İndir (PDF)"
+                    >
+                        <span>🛠️</span> Bakım Fişi (PDF)
+                    </a>
+
+                    <a
+                        v-if="isDofWorkflow"
+                        :href="route('processes.dof-report', instance.id)"
+                        target="_blank"
+                        class="inline-flex items-center gap-1.5 rounded-xl bg-purple-600 px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-purple-700 transition-all transform hover:-translate-y-0.5"
+                        title="Resmi DÖF / 8D Kalite Raporunu İndir (PDF)"
+                    >
+                        <span>🔬</span> DÖF Raporu (PDF)
+                    </a>
+
+                    <a
+                        v-if="isPurchaseWorkflow"
+                        :href="route('processes.purchase-order', instance.id)"
+                        target="_blank"
+                        class="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-emerald-700 transition-all transform hover:-translate-y-0.5"
+                        title="Resmi Malzeme Satın Alma Talep Fişini İndir (PDF)"
+                    >
+                        <span>🛒</span> Satın Alma Fişi (PDF)
+                    </a>
+
                     <Link
                         v-if="isCompleted && isTravelWorkflow && expenseWorkflowId"
                         :href="route('processes.create', expenseWorkflowId)"
@@ -1027,6 +1080,62 @@ const submitReschedule = () => {
                     </div>
                 </div>
 
+                <!-- KURUMSAL BÜTÇE & MASRAF MERKEZİ KONTROL PANELİ (Item D) -->
+                <div 
+                    v-if="budgetControl && budgetControl.has_budget_impact" 
+                    class="rounded-2xl border p-5 shadow-sm transition-all"
+                    :class="[
+                        budgetControl.status === 'critical' 
+                            ? 'bg-rose-50/70 border-rose-200' 
+                            : (budgetControl.status === 'warning' 
+                                ? 'bg-amber-50/70 border-amber-200' 
+                                : 'bg-emerald-50/70 border-emerald-200')
+                    ]"
+                >
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                        <div class="flex items-center gap-3">
+                            <div :class="['w-10 h-10 rounded-xl flex items-center justify-center text-xl shadow-xs', budgetControl.badge_color]">
+                                💳
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h4 class="font-bold text-sm text-gray-900">Kurumsal Bütçe & Masraf Merkezi Kontrolü</h4>
+                                    <span :class="['text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border', budgetControl.badge_color]">
+                                        {{ budgetControl.status_label }}
+                                    </span>
+                                </div>
+                                <span class="text-xs text-gray-500">
+                                    Masraf Merkezi: <strong>{{ budgetControl.cost_center }}</strong> · Dönem: {{ budgetControl.fiscal_period }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="text-right">
+                            <span class="text-xs text-gray-500 block">Talep Edilen Tutar</span>
+                            <span class="text-base font-black text-gray-900">{{ budgetControl.amount_formatted }}</span>
+                        </div>
+                    </div>
+
+                    <!-- Progress Bar -->
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between text-xs font-semibold text-gray-700">
+                            <span>Dönem Bütçesi: {{ budgetControl.allocated_budget_formatted }}</span>
+                            <span>Tüketim Oranı: %{{ budgetControl.consumption_rate }}</span>
+                        </div>
+                        <div class="w-full bg-gray-200/80 rounded-full h-3 overflow-hidden shadow-inner flex">
+                            <div 
+                                :class="budgetControl.bar_color" 
+                                class="h-full rounded-full transition-all duration-500"
+                                :style="{ width: Math.min(100, budgetControl.consumption_rate) + '%' }"
+                            ></div>
+                        </div>
+                        <div class="flex items-center justify-between text-[11px] text-gray-500 pt-0.5">
+                            <span>Önceki Harcama: {{ budgetControl.base_consumed_formatted }} (%{{ budgetControl.previous_rate }})</span>
+                            <span>Kalan Kullanılabilir: <strong class="text-gray-800">{{ budgetControl.remaining_budget_formatted }}</strong></span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 2. DOĞRUSAL SÜREÇ YOL HARİTASI (LINEAR PROCESS STEPPER) -->
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-200/80 p-6 sm:p-8 overflow-hidden">
                     <div class="flex items-center justify-between mb-6 border-b border-gray-100 pb-4">
@@ -1196,6 +1305,19 @@ const submitReschedule = () => {
                             :class="activeTab === 'sla_history' ? 'border-indigo-600 text-indigo-600 bg-white shadow-sm' : 'border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-100/50'"
                         >
                             <span>⏱️</span> Termin & SLA Geçmişi ({{ terminRevisions.length }})
+                        </button>
+
+                        <!-- SÜRE & DARBOĞAZ ANALİZİ SEKMESİ (Item A) -->
+                        <button
+                            type="button"
+                            @click="activeTab = 'lead_time'"
+                            class="px-5 py-4 text-sm font-bold border-b-2 flex items-center gap-2 transition-all whitespace-nowrap"
+                            :class="activeTab === 'lead_time' ? 'border-indigo-600 text-indigo-600 bg-white shadow-sm' : 'border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-100/50'"
+                        >
+                            <span>⏳</span> Süre & Darboğaz Analizi
+                            <span v-if="leadTimeAnalytics?.bottleneck_step" class="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 animate-pulse">
+                                Darboğaz
+                            </span>
                         </button>
                     </div>
 
@@ -1610,6 +1732,78 @@ const submitReschedule = () => {
                                 <div v-if="audit.comment" class="mt-3 text-xs bg-white p-3 rounded-xl border border-gray-100 text-gray-700">
                                     <span class="font-bold text-gray-500 uppercase text-[10px] block mb-0.5">Açıklama / Gerekçe:</span>
                                     <span class="italic text-gray-800">{{ audit.comment }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SEKME 6: SÜRE VE DARBOĞAZ ANALİZİ (LEAD TIME & BOTTLENECK - Item A) -->
+                    <div v-show="activeTab === 'lead_time'" class="p-6 sm:p-8 space-y-6">
+                        <!-- Top KPI Cards -->
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div class="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                                <span class="text-xs font-bold text-slate-400 uppercase">Toplam Süreç Süresi</span>
+                                <div class="text-xl font-black text-slate-900 mt-1 font-mono">
+                                    {{ leadTimeAnalytics?.total_duration_formatted || 'Hesaplanıyor' }}
+                                </div>
+                                <span class="text-[11px] text-slate-500 mt-0.5 block">Tüm adımların toplam harcanan zamanı</span>
+                            </div>
+
+                            <div class="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                                <span class="text-xs font-bold text-slate-400 uppercase">Ortalama Adım Süresi</span>
+                                <div class="text-xl font-black text-indigo-700 mt-1 font-mono">
+                                    {{ leadTimeAnalytics?.average_step_formatted || '0 dk' }}
+                                </div>
+                                <span class="text-[11px] text-slate-500 mt-0.5 block">{{ leadTimeAnalytics?.total_steps_count || 0 }} adım üzerinden ortalama</span>
+                            </div>
+
+                            <div class="p-4 rounded-xl border" :class="leadTimeAnalytics?.bottleneck_step ? 'bg-rose-50/70 border-rose-200' : 'bg-emerald-50/70 border-emerald-200'">
+                                <span class="text-xs font-bold uppercase" :class="leadTimeAnalytics?.bottleneck_step ? 'text-rose-500' : 'text-emerald-500'">
+                                    {{ leadTimeAnalytics?.bottleneck_step ? '🚨 Tespit Edilen Darboğaz' : 'Akış Durumu' }}
+                                </span>
+                                <div class="text-base font-black truncate mt-1" :class="leadTimeAnalytics?.bottleneck_step ? 'text-rose-900' : 'text-emerald-900'">
+                                    {{ leadTimeAnalytics?.bottleneck_step?.title || 'Dengeli Akış' }}
+                                </div>
+                                <span class="text-[11px] block mt-0.5" :class="leadTimeAnalytics?.bottleneck_step ? 'text-rose-600' : 'text-emerald-600'">
+                                    {{ leadTimeAnalytics?.bottleneck_step ? `Süre: ${leadTimeAnalytics.bottleneck_step.duration_formatted} (Toplamın %${leadTimeAnalytics.bottleneck_step.percentage}'i)` : 'Tüm adımlar hedef süreler dahilinde.' }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Lead Time Breakdown Table / Timeline -->
+                        <div class="border border-gray-200 rounded-xl overflow-hidden">
+                            <div class="p-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                                <h4 class="font-bold text-sm text-gray-900 flex items-center gap-2">
+                                    <span>📊</span> Adım Bazlı Bekleme Süresi & Isı Haritası
+                                </h4>
+                                <span class="text-xs text-gray-500">🟢 Hızlı (&lt; 2h) · 🟡 Normal · 🔴 Darboğaz</span>
+                            </div>
+
+                            <div class="divide-y divide-gray-100">
+                                <div v-for="step in leadTimeAnalytics?.steps || []" :key="step.task_id" class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-gray-50/80 transition">
+                                    <div class="flex-1">
+                                        <div class="flex items-center gap-2 flex-wrap">
+                                            <h5 class="font-bold text-sm text-gray-900">{{ step.title }}</h5>
+                                            <span v-if="step.is_bottleneck" class="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300">
+                                                🚨 DARBOĞAZ
+                                            </span>
+                                            <span class="text-xs text-gray-400">· Sorumlu: {{ step.completed_user || step.assigned_user }}</span>
+                                        </div>
+
+                                        <!-- Progress bar showing percentage of total process time -->
+                                        <div class="w-full bg-gray-100 rounded-full h-2 mt-2 overflow-hidden flex">
+                                            <div 
+                                                :class="step.is_bottleneck ? 'bg-rose-500' : (step.duration_minutes < 120 ? 'bg-emerald-500' : 'bg-amber-500')" 
+                                                class="h-full rounded-full transition-all duration-300"
+                                                :style="{ width: Math.max(4, step.percentage) + '%' }"
+                                            ></div>
+                                        </div>
+                                    </div>
+
+                                    <div class="text-right sm:w-48 shrink-0">
+                                        <span class="text-sm font-black text-gray-900 block font-mono">{{ step.duration_formatted }}</span>
+                                        <span class="text-[11px] text-gray-400 block">%{{ step.percentage }} toplam süre</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>

@@ -39,7 +39,7 @@ class FormTemplateController extends Controller
     {
         return Inertia::render('FormBuilder/Designer', [
             'categories' => FormCategory::orderBy('name')->get(),
-            'app_logo' => Setting::where('key', 'app_logo')->value('value'),
+            'app_logo' => Setting::where('key', 'app_logo')->value('value') ?: 'images/koksan_logo.png',
             'available_bindings' => $this->getAvailableBindings() // Eklendi
         ]);
     }
@@ -56,6 +56,7 @@ class FormTemplateController extends Controller
             'revision_no' => 'nullable|string|max:255',
             'revision_date' => 'nullable|date',
             'page_no' => 'nullable|integer',
+            'paper_size' => 'nullable|string|in:a4,a5',
             'logo_width' => 'nullable|numeric|min:1|max:10',
             'logo_height' => 'nullable|numeric|min:1|max:10',
         ]);
@@ -75,7 +76,7 @@ class FormTemplateController extends Controller
 
         return Inertia::render('FormBuilder/Show', [
             'template' => $formTemplate,
-            'app_logo' => Setting::where('key', 'app_logo')->value('value'),
+            'app_logo' => Setting::where('key', 'app_logo')->value('value') ?: 'images/koksan_logo.png',
         ]);
     }
 
@@ -84,7 +85,7 @@ class FormTemplateController extends Controller
         return Inertia::render('FormBuilder/Designer', [
             'template' => $formTemplate,
             'categories' => FormCategory::orderBy('name')->get(),
-            'app_logo' => Setting::where('key', 'app_logo')->value('value'),
+            'app_logo' => Setting::where('key', 'app_logo')->value('value') ?: 'images/koksan_logo.png',
             'available_bindings' => $this->getAvailableBindings() // Eklendi
         ]);
     }
@@ -101,6 +102,7 @@ class FormTemplateController extends Controller
             'revision_no' => 'nullable|string|max:255',
             'revision_date' => 'nullable|date',
             'page_no' => 'nullable|integer',
+            'paper_size' => 'nullable|string|in:a4,a5',
             'logo_width' => 'nullable|numeric|min:1|max:10',
             'logo_height' => 'nullable|numeric|min:1|max:10',
         ]);

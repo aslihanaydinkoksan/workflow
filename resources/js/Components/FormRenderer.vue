@@ -1,6 +1,6 @@
 <script setup>
-import { defineProps, defineEmits, ref, watch, computed } from 'vue';
-// html2pdf importunu SİLDİK!
+import { defineProps, defineEmits, ref, watch, computed, onMounted } from 'vue';
+import axios from 'axios';
 
 const props = defineProps({
     elements: {
@@ -272,6 +272,76 @@ const getOptions = (optionsStr) => {
     return [];
 };
 
+// --- DİNAMİK ORGANİZASYON & EKİPMAN AĞACI VERİ ENTEGRASYONU ---
+const hierarchyNodesMap = ref({ all: [], bySubtype: {} });
+const isHierarchyLoading = ref(false);
+
+const loadHierarchyData = async () => {
+    const hasHierarchyField = (props.elements || []).some(el =>
+        el.datasource === 'hierarchy_nodes' ||
+        el.type === 'hierarchy_select' ||
+        el.hierarchy_subtype ||
+        el.id === 'makine' ||
+        el.id === 'kullanilacak_makine' ||
+        el.id === 'hedef_makine' ||
+        el.id === 'planlanan_hat' ||
+        el.id === 'hat' ||
+        el.id === 'ekipman'
+    );
+
+    if (!hasHierarchyField) return;
+
+    isHierarchyLoading.value = true;
+    try {
+        const res = await axios.get(route('api.hierarchy.nodes'));
+        if (res.data && res.data.success) {
+            const nodes = res.data.data || [];
+            const bySub = {};
+            nodes.forEach(n => {
+                const sub = n.node_subtype || 'genel';
+                if (!bySub[sub]) bySub[sub] = [];
+                bySub[sub].push(n);
+            });
+            hierarchyNodesMap.value = {
+                all: nodes,
+                bySubtype: bySub,
+            };
+        }
+    } catch (e) {
+        console.error('Hiyerarşi düğümleri çekilemedi:', e);
+    } finally {
+        isHierarchyLoading.value = false;
+    }
+};
+
+onMounted(() => {
+    loadHierarchyData();
+});
+
+const isHierarchyField = (element) => {
+    return element.datasource === 'hierarchy_nodes' ||
+        element.type === 'hierarchy_select' ||
+        !!element.hierarchy_subtype ||
+        element.id === 'makine' ||
+        element.id === 'kullanilacak_makine' ||
+        element.id === 'hedef_makine' ||
+        element.id === 'planlanan_hat' ||
+        element.id === 'hat' ||
+        element.id === 'ekipman';
+};
+
+const getElementOptions = (element) => {
+    if (isHierarchyField(element)) {
+        const subtype = element.hierarchy_subtype || 'makine';
+        const list = hierarchyNodesMap.value.bySubtype?.[subtype] || hierarchyNodesMap.value.all || [];
+        if (list.length > 0) {
+            return list.map(n => n.display_text || n.label);
+        }
+    }
+    return getOptions(element.options);
+};
+
+
 // Tarih ve Tarih Aralığı Yardımcı Fonksiyonları
 const formatDisplayDate = (val) => {
     if (!val) return '-';
@@ -502,6 +572,54 @@ const exportToExcel = () => {
     // Excel dosyaları yeni sekme açmadan doğrudan indirme tetikler
     window.location.href = route('tasks.export.excel', props.taskId);
 };
+
+// --- LOGO ÇÖZÜMLEME (KÖKSAN DEFAULT) ---
+const computedLogo = computed(() => {
+    const raw = props.appLogo || props.template?.app_logo || '/images/koksan_logo.png';
+    if (!raw) return '/images/koksan_logo.png';
+    if (raw.startsWith('http') || raw.startsWith('/') || raw.startsWith('data:')) return raw;
+    return '/' + raw;
+});
+
+// --- EVET / HAYIR (İŞ AKIŞI KARAR ELEMANI) MOTORU ---
+const getYesNoValue = (elementId) => {
+    const val = formData.value[elementId];
+    if (val && typeof val === 'object') {
+        return val.decision || '';
+    }
+    return val !== undefined && val !== null ? String(val) : '';
+};
+
+const getYesNoNote = (elementId) => {
+    const val = formData.value[elementId];
+    if (val && typeof val === 'object' && val.note !== undefined) {
+        return val.note;
+    }
+    return formData.value[elementId + '_note'] || '';
+};
+
+const setYesNoDecision = (element, decision) => {
+    if (isFieldDisabled(element)) return;
+    formData.value[element.id] = decision;
+};
+
+const setYesNoNote = (element, note) => {
+    if (isFieldDisabled(element)) return;
+    formData.value[element.id + '_note'] = note;
+};
+
+const isYesNoActive = (element, type) => {
+    const current = getYesNoValue(element.id).toLowerCase().trim();
+    if (!current) return false;
+    if (type === 'yes') {
+        const target = (element.yes_label || 'evet').toLowerCase().trim();
+        return current === target || current === 'evet' || current === 'onay' || current === 'onaylandı' || current === 'kabul' || current === 'true';
+    } else if (type === 'no') {
+        const target = (element.no_label || 'hayır').toLowerCase().trim();
+        return current === target || current === 'hayır' || current === 'ret' || current === 'reddedildi' || current === 'iptal' || current === 'false';
+    }
+    return false;
+};
 </script>
 
 <template>
@@ -528,23 +646,21 @@ const exportToExcel = () => {
             </button>
         </div>
 
-        <!-- A4 Container (veya normal container) -->
+        <!-- A4 / A5 Container -->
         <div ref="a4Document"
-            :class="template ? 'bg-white shadow-xl mx-auto p-8 border border-gray-200 print:shadow-none print:border-none w-full' : ''"
-            :style="template ? 'min-height: 29.7cm;' : ''">
+            :class="template ? [
+                'bg-white shadow-xl mx-auto p-8 border border-gray-200 print:shadow-none print:border-none w-full transition-all duration-300',
+                template.paper_size === 'a5' ? 'max-w-2xl' : 'max-w-4xl'
+            ] : ''"
+            :style="template ? (template.paper_size === 'a5' ? 'min-height: 21cm;' : 'min-height: 29.7cm;') : ''">
 
             <!-- Köksan Doküman Başlığı (Sadece template varsa) -->
-            <div v-if="template && taskId" class="mb-8 border-2 border-black w-full flex flex-col md:flex-row">
-                <!-- Logo Alanı -->
+            <div v-if="template && taskId" class="mb-8 border-2 border-black w-full flex flex-col md:flex-row bg-white">
+                <!-- Logo Alanı (Köksan Amblemi Otomatik Default) -->
                 <div
-                    class="border-b-2 border-black md:border-b-0 md:border-r-2 border-black p-2 flex items-center justify-center min-w-[200px]">
-                    <img v-if="appLogo" :src="appLogo" alt="App Logo"
+                    class="border-b-2 border-black md:border-b-0 md:border-r-2 border-black p-2 flex items-center justify-center min-w-[200px] bg-white">
+                    <img :src="computedLogo" alt="Köksan Amblemi"
                         :style="{ width: (template.logo_width || 4.5) + 'cm', height: (template.logo_height || 1.5) + 'cm', objectFit: 'contain' }">
-                    <div v-else
-                        class="text-xs text-gray-400 border border-dashed border-gray-300 p-4 flex items-center justify-center text-center"
-                        :style="{ width: (template.logo_width || 4.5) + 'cm', height: (template.logo_height || 1.5) + 'cm' }">
-                        Logo Yok
-                    </div>
                 </div>
 
                 <!-- Başlık Alanı -->
@@ -805,14 +921,20 @@ const exportToExcel = () => {
                             </div>
                         </div>
 
-                        <select v-else-if="element.type === 'select'" :id="'field_' + element.id" v-model="formData[element.id]"
-                            :required="element.required && isFieldVisible(element)"
-                            :disabled="isFieldDisabled(element, section)"
-                            class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-600 disabled:cursor-not-allowed disabled:opacity-80 disabled:border-gray-200 transition-colors">
-                            <option value="" disabled>Seçiniz...</option>
-                            <option v-for="(opt, i) in getOptions(element.options)" :key="i"
-                                :value="opt.trim ? opt.trim() : opt">{{ opt.trim ? opt.trim() : opt }}</option>
-                        </select>
+                        <div v-else-if="element.type === 'select' || element.type === 'hierarchy_select'" class="space-y-1">
+                            <div v-if="isHierarchyField(element)" class="flex items-center gap-1.5 text-[10px] text-emerald-700 font-bold mb-1">
+                                <span>🏭 Fabrika Ekipman & Makine Ağacından Dinamik Gelir</span>
+                                <span v-if="isHierarchyLoading" class="text-slate-400 font-normal">Yükleniyor...</span>
+                            </div>
+                            <select :id="'field_' + element.id" v-model="formData[element.id]"
+                                :required="element.required && isFieldVisible(element)"
+                                :disabled="isFieldDisabled(element, section)"
+                                class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-600 disabled:cursor-not-allowed disabled:opacity-80 disabled:border-gray-200 transition-colors">
+                                <option value="" disabled>Seçiniz...</option>
+                                <option v-for="(opt, i) in getElementOptions(element)" :key="i"
+                                    :value="opt.trim ? opt.trim() : opt">{{ opt.trim ? opt.trim() : opt }}</option>
+                            </select>
+                        </div>
 
                         <div v-else-if="element.type === 'radio'" class="space-y-2 mt-2">
                             <div v-for="(opt, i) in getOptions(element.options)" :key="i" class="flex items-center">
@@ -839,6 +961,105 @@ const exportToExcel = () => {
                                 class="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-80 transition-colors" />
                             <span class="ml-2 text-sm"
                                 :class="isFieldDisabled(element, section) ? 'text-gray-500' : 'text-gray-700'">Evet/Onaylıyorum</span>
+                        </div>
+
+                        <!-- EVET / HAYIR KARAR & ONAY ELEMANI (FULLY FUNCTIONAL) -->
+                        <div v-else-if="element.type === 'yes_no'" class="p-4 bg-gradient-to-r from-slate-50 via-white to-indigo-50/30 rounded-2xl border border-indigo-100 shadow-2xs space-y-3.5">
+                            <div class="flex items-center justify-between">
+                                <label class="block text-sm font-bold text-slate-800">
+                                    ⚖️ {{ element.label }}
+                                    <span v-if="element.required && isFieldVisible(element)" class="text-red-500 ml-1" title="Zorunlu Karar">*</span>
+                                </label>
+                                <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full"
+                                    :class="isYesNoActive(element, 'yes') 
+                                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                                        : (isYesNoActive(element, 'no') 
+                                            ? 'bg-rose-100 text-rose-800 border border-rose-300' 
+                                            : 'bg-indigo-50 text-indigo-700 border border-indigo-200')">
+                                    {{ isYesNoActive(element, 'yes') ? '✅ ' + (element.yes_label || 'Onaylandı') : (isYesNoActive(element, 'no') ? '❌ ' + (element.no_label || 'Reddedildi') : 'İş Akışı Kararı Bekleniyor') }}
+                                </span>
+                            </div>
+
+                            <p v-if="element.description" class="text-xs text-slate-600 leading-relaxed">{{ element.description }}</p>
+
+                            <!-- 1. Salt Okunur / Tamamlanmış Görünüm -->
+                            <div v-if="isFieldDisabled(element, section)" class="space-y-2.5">
+                                <div class="flex items-center gap-3">
+                                    <div v-if="isYesNoActive(element, 'yes')" 
+                                        class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-50 text-emerald-800 border-2 border-emerald-500 font-bold text-sm shadow-xs">
+                                        <span class="text-lg">✅</span>
+                                        <span>{{ element.yes_label || 'Evet / Onaylandı' }}</span>
+                                    </div>
+                                    <div v-else-if="isYesNoActive(element, 'no')" 
+                                        class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-50 text-rose-800 border-2 border-rose-500 font-bold text-sm shadow-xs">
+                                        <span class="text-lg">❌</span>
+                                        <span>{{ element.no_label || 'Hayır / Reddedildi' }}</span>
+                                    </div>
+                                    <div v-else class="text-sm text-slate-400 italic bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
+                                        Karar belirtilmedi
+                                    </div>
+                                </div>
+
+                                <div v-if="getYesNoNote(element.id)" class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 flex items-start gap-2 shadow-2xs">
+                                    <span class="font-bold text-slate-500 shrink-0">📝 Karar Gerekçesi / Not:</span>
+                                    <span class="font-medium leading-relaxed">{{ getYesNoNote(element.id) }}</span>
+                                </div>
+                            </div>
+
+                            <!-- 2. Düzenlenebilir / Aktif Karar Giriş Modu -->
+                            <div v-else class="space-y-3">
+                                <!-- Zorunlu kontrolü için görünmez native input -->
+                                <input type="text" :id="'field_' + element.id" :name="element.id" :value="formData[element.id]"
+                                    :required="element.required && isFieldVisible(element)"
+                                    class="sr-only" tabindex="-1" />
+
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <!-- Evet Butonu -->
+                                    <button
+                                        type="button"
+                                        @click="setYesNoDecision(element, element.yes_label || 'Evet')"
+                                        :class="[
+                                            'p-3.5 rounded-xl border-2 text-center flex items-center justify-center gap-2.5 font-black text-sm transition-all duration-200 shadow-2xs',
+                                            isYesNoActive(element, 'yes')
+                                                ? 'bg-emerald-600 text-white border-emerald-600 ring-4 ring-emerald-500/25 shadow-md transform scale-[1.01]'
+                                                : 'bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-50/70 hover:border-emerald-400'
+                                        ]"
+                                    >
+                                        <span class="text-lg">✅</span>
+                                        <span>{{ element.yes_label || 'Evet / Onaylandı' }}</span>
+                                    </button>
+
+                                    <!-- Hayır Butonu -->
+                                    <button
+                                        type="button"
+                                        @click="setYesNoDecision(element, element.no_label || 'Hayır')"
+                                        :class="[
+                                            'p-3.5 rounded-xl border-2 text-center flex items-center justify-center gap-2.5 font-black text-sm transition-all duration-200 shadow-2xs',
+                                            isYesNoActive(element, 'no')
+                                                ? 'bg-rose-600 text-white border-rose-600 ring-4 ring-rose-500/25 shadow-md transform scale-[1.01]'
+                                                : 'bg-white text-rose-700 border-rose-300 hover:bg-rose-50/70 hover:border-rose-400'
+                                        ]"
+                                    >
+                                        <span class="text-lg">❌</span>
+                                        <span>{{ element.no_label || 'Hayır / Reddedildi' }}</span>
+                                    </button>
+                                </div>
+
+                                <!-- Gerekçe / Açıklama Notu -->
+                                <div v-if="element.show_note || isYesNoActive(element, 'no')" class="space-y-1.5 pt-1">
+                                    <label class="block text-xs font-bold text-slate-600 flex items-center justify-between">
+                                        <span>📝 Karar Gerekçesi / Açıklama Notu</span>
+                                        <span v-if="isYesNoActive(element, 'no')" class="text-[10px] text-rose-600 font-bold">Öneri: Ret gerekçesini yazınız</span>
+                                    </label>
+                                    <textarea
+                                        :value="getYesNoNote(element.id)"
+                                        @input="setYesNoNote(element, $event.target.value)"
+                                        rows="2"
+                                        :placeholder="element.note_placeholder || 'Kararınızla ilgili gerekçe, şart veya açıklama giriniz...'"
+                                        class="block w-full rounded-xl border-slate-300 shadow-2xs focus:border-indigo-500 focus:ring-indigo-500 text-xs py-2 px-3 placeholder-slate-400"
+                                    ></textarea>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- TABLO & DİNAMİK SATIR ELEMANI (REPEATER GRID) -->
@@ -1015,5 +1236,19 @@ const exportToExcel = () => {
 
 .col-span-3 {
     grid-column: span 3 / span 3;
+}
+
+@media print {
+    .print\:hidden {
+        display: none !important;
+    }
+    body {
+        background: white !important;
+    }
+    .form-renderer-wrapper {
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
 }
 </style>

@@ -265,4 +265,44 @@ class HierarchyTestController extends Controller
 
         return response()->json(['success' => true]);
     }
+
+    /**
+     * Form ve süreçler için aktif hiyerarşi/makine/ekipman düğümlerini döner.
+     */
+    public function apiNodes(Request $request): JsonResponse
+    {
+        $subtype = $request->query('subtype');
+        $treeTypeId = $request->query('tree_type_id');
+
+        $query = Node::where('is_active', true);
+
+        if ($subtype) {
+            $query->where('node_subtype', $subtype);
+        }
+        if ($treeTypeId) {
+            $query->where('tree_type_id', $treeTypeId);
+        }
+
+        $nodes = $query->orderBy('label')->get()->map(function ($n) {
+            $meta = $n->metadata ?? [];
+            $code = $meta['seri_no'] ?? $meta['marka_model'] ?? null;
+            $status = $meta['durum'] ?? null;
+            return [
+                'id' => $n->id,
+                'key' => $n->key,
+                'label' => $n->label,
+                'node_subtype' => $n->node_subtype,
+                'tree_type_id' => $n->tree_type_id,
+                'code' => $code,
+                'status' => $status,
+                'metadata' => $meta,
+                'display_text' => $n->label . ($code ? " ({$code})" : '') . ($status ? " · {$status}" : ''),
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $nodes,
+        ]);
+    }
 }

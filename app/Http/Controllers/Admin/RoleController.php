@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Services\PermissionRegistryService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Spatie\Permission\Models\Role;
@@ -10,19 +11,31 @@ use Spatie\Permission\Models\Permission;
 
 class RoleController extends Controller
 {
+    public function __construct(
+        protected PermissionRegistryService $registry
+    ) {}
+
     public function index()
     {
-        $roles = Role::withCount('permissions')->latest()->get();
+        $roles = Role::withCount('permissions')->with('permissions')->orderBy('id', 'asc')->get();
+        foreach ($roles as $role) {
+            $role->module_badges = $this->registry->getRoleModuleBadges($role);
+        }
+
+        $modules = $this->registry->getModuleGroupedPermissions();
+
         return Inertia::render('Admin/Roles/Index', [
-            'roles' => $roles
+            'roles' => $roles,
+            'modules' => $modules,
         ]);
     }
 
     public function create()
     {
-        $permissions = Permission::all();
+        $modules = $this->registry->getModuleGroupedPermissions();
         return Inertia::render('Admin/Roles/Form', [
-            'permissions' => $permissions
+            'modules' => $modules,
+            'permissions' => Permission::all(),
         ]);
     }
 
@@ -43,12 +56,13 @@ class RoleController extends Controller
 
     public function edit(Role $role)
     {
-        $permissions = Permission::all();
+        $modules = $this->registry->getModuleGroupedPermissions();
         $rolePermissions = $role->permissions->pluck('name')->toArray();
 
         return Inertia::render('Admin/Roles/Form', [
             'role' => $role,
-            'permissions' => $permissions,
+            'modules' => $modules,
+            'permissions' => Permission::all(),
             'rolePermissions' => $rolePermissions
         ]);
     }
@@ -103,5 +117,31 @@ class RoleController extends Controller
                 'taskCount' => $taskCount
             ]
         ]);
+    }
+
+    /**
+     * İleriye Dönük Yeni Modül & Yetki Tanımlama (Zero-Code Extensibility)
+     */
+    public function storePermission(Request $request)
+    {
+        $validated = $request->validate([
+            'name' => 'required|string|max:100|unique:permissions,name',
+            'label' => 'required|string|max:255',
+            'module_key' => 'required|string|max:50',
+            'module_title' => 'nullable|string|max:100',
+            'module_icon' => 'nullable|string|max:10',
+            'description' => 'nullable|string|max:500',
+        ]);
+
+        $this->registry->registerPermission(
+            $validated['name'],
+            $validated['label'],
+            $validated['module_key'],
+            $validated['description'] ?? null,
+            $validated['module_title'] ?? null,
+            $validated['module_icon'] ?? null
+        );
+
+        return back()->with('success', "Yeni '{$validated['label']}' yetkisi sisteme kaydedildi!");
     }
 }

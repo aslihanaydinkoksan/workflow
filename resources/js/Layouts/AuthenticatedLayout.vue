@@ -236,6 +236,70 @@ watch(
 onBeforeUnmount(() => {
     clearPendingTasksToastTimer();
 });
+
+// --- GLOBAL VEKALET & İZİN YÖNETİMİ ---
+const activeDelegationGiven = computed(() => page.props.active_delegation_given);
+const activeDelegationsReceived = computed(() => page.props.active_delegations_received || []);
+const allColleagues = computed(() => page.props.all_colleagues || []);
+
+const showQuickDelegationModal = ref(false);
+const quickDelegationForm = ref({
+    delegatee_id: '',
+    start_date: new Date().toISOString().split('T')[0],
+    end_date: '',
+    scope_type: 'all',
+    reason: '',
+});
+const isSubmittingDelegation = ref(false);
+
+const openQuickDelegationModal = () => {
+    const today = new Date();
+    const nextWeek = new Date();
+    nextWeek.setDate(today.getDate() + 7);
+    quickDelegationForm.value = {
+        delegatee_id: '',
+        start_date: today.toISOString().split('T')[0],
+        end_date: nextWeek.toISOString().split('T')[0],
+        scope_type: 'all',
+        reason: 'Yıllık İzin / Şirket Dışı Görevlendirme',
+    };
+    showQuickDelegationModal.value = true;
+};
+
+const submitQuickDelegation = () => {
+    if (!quickDelegationForm.value.delegatee_id || !quickDelegationForm.value.start_date || !quickDelegationForm.value.end_date) {
+        alert('Lütfen vekil personel ve başlangıç-bitiş tarihlerini eksiksiz giriniz.');
+        return;
+    }
+    isSubmittingDelegation.value = true;
+    router.post(route('delegations.store'), quickDelegationForm.value, {
+        preserveScroll: true,
+        onSuccess: () => {
+            showQuickDelegationModal.value = false;
+        },
+        onFinish: () => {
+            isSubmittingDelegation.value = false;
+        },
+    });
+};
+
+const cancelDelegation = (id) => {
+    if (confirm('Aktif vekaletinizi sonlandırmak ve görevleri tekrar üzerinize almak istiyor musunuz?')) {
+        router.delete(route('delegations.destroy', id), {
+            preserveScroll: true,
+        });
+    }
+};
+
+const formatShortDate = (val) => {
+    if (!val) return '';
+    try {
+        const d = new Date(val);
+        return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' });
+    } catch {
+        return val;
+    }
+};
 </script>
 
 <template>
@@ -335,6 +399,37 @@ onBeforeUnmount(() => {
             <!-- Geliştirme & Test Ortamı İçin Rol Değiştirici -->
             <DevUserSwitcher />
 
+            <!-- GLOBAL AKTİF VEKALET / İZİN BİLDİRİM BANNERI -->
+            <div v-if="activeDelegationGiven"
+                class="bg-gradient-to-r from-amber-500 via-orange-600 to-amber-600 text-white px-4 py-2.5 shadow-md flex flex-wrap items-center justify-between gap-3 text-xs border-b border-amber-600 z-50 relative">
+                <div class="flex items-center gap-2.5">
+                    <span class="text-lg animate-bounce">🏖️</span>
+                    <div>
+                        <span class="font-extrabold uppercase tracking-wide bg-amber-900/40 px-2 py-0.5 rounded text-[11px] mr-1.5">İzin & Vekalet Aktif</span>
+                        <span>Görevleriniz <strong>{{ activeDelegationGiven.delegatee?.name }}</strong> personeline yönlendiriliyor (Bitiş: {{ formatShortDate(activeDelegationGiven.end_date) }}).</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button @click="cancelDelegation(activeDelegationGiven.id)"
+                        class="px-3 py-1 bg-white hover:bg-amber-50 text-amber-900 font-bold rounded-lg shadow-xs text-xs transition flex items-center gap-1">
+                        <span>❌</span> Vekaleti Sonlandır
+                    </button>
+                </div>
+            </div>
+
+            <div v-else-if="activeDelegationsReceived.length > 0"
+                class="bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white px-4 py-2 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs border-b border-teal-700/60 z-50 relative">
+                <div class="flex items-center gap-2">
+                    <span class="text-base">💼</span>
+                    <span>
+                        <strong>Vekaleten İşlem Yetkisi:</strong>
+                        <span v-for="(del, i) in activeDelegationsReceived" :key="del.id">
+                            <strong>{{ del.delegator?.name }}</strong>{{ i < activeDelegationsReceived.length - 1 ? ', ' : '' }}
+                        </span> adına vekaleten onay verme ve form doldurma yetkiniz bulunmaktadır.
+                    </span>
+                </div>
+            </div>
+
             <!-- Modern Top Navigation -->
             <nav class="bg-white shadow-sm border-b border-gray-100 sticky top-0 z-40">
                 <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -396,6 +491,17 @@ onBeforeUnmount(() => {
                                     <span v-if="myRunningProcessesCount > 0" class="ml-1.5 px-2 py-0.5 text-[11px] font-bold bg-amber-100 text-amber-800 rounded-full">
                                         {{ myRunningProcessesCount }}
                                     </span>
+                                </NavLink>
+
+                                <NavLink :href="route('reports.index')"
+                                    :active="route().current('reports.*')">
+                                    📊 Raporlama & BI
+                                </NavLink>
+
+                                <NavLink v-if="hasPermission('duty_radar.view')"
+                                    :href="route('duty-radar.index')"
+                                    :active="route().current('duty-radar.*')">
+                                    📍 Kim Nerede?
                                 </NavLink>
                             </div>
                         </div>
@@ -502,6 +608,8 @@ onBeforeUnmount(() => {
                                             :href="route('admin.users.index')">Kullanıcılar</DropdownLink>
                                         <DropdownLink v-if="hasPermission('manage_roles')"
                                             :href="route('admin.roles.index')">Roller & Yetkiler</DropdownLink>
+                                        <DropdownLink v-if="hasPermission('view_admin_panel')"
+                                            :href="route('admin.audit-logs.index')">🛡️ Denetim İzi & Güvenlik Kokpiti</DropdownLink>
                                         <div class="border-t border-gray-100 my-1"></div>
                                         <div
                                             class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
@@ -519,6 +627,9 @@ onBeforeUnmount(() => {
                                         </DropdownLink>
                                         <DropdownLink v-if="hasPermission('create_forms')"
                                             :href="route('admin.form-categories.index')">Form Kategorileri
+                                        </DropdownLink>
+                                        <DropdownLink v-if="hasPermission('duty_radar.manage_categories') || hasPermission('view_admin_panel')"
+                                            :href="route('admin.duty-categories.index')">📍 Görev & Saha Türleri
                                         </DropdownLink>
                                         <DropdownLink :href="route('follow-ups.index')">⏱️ Numune & Süreç Takipleri (CRM)</DropdownLink>
                                         <div class="border-t border-gray-100 my-1"></div>
@@ -558,6 +669,10 @@ onBeforeUnmount(() => {
                                     </template>
                                     <template #content>
                                         <DropdownLink :href="route('profile.edit')">Profilim</DropdownLink>
+                                        <button type="button" @click="openQuickDelegationModal"
+                                            class="block w-full px-4 py-2 text-left text-sm leading-5 text-amber-700 hover:bg-amber-50 font-semibold transition flex items-center gap-1.5">
+                                            <span>🏖️</span> İzin & Vekalet Modu
+                                        </button>
                                         <DropdownLink :href="`${ssoUrl}/profile`">Merkezi Ayarlar</DropdownLink>
                                         <div class="border-t border-gray-100"></div>
                                         <DropdownLink :href="route('logout')" method="post" as="button"
@@ -634,6 +749,21 @@ onBeforeUnmount(() => {
                             </div>
                         </ResponsiveNavLink>
 
+                        <ResponsiveNavLink :href="route('reports.index')"
+                            :active="route().current('reports.*')">
+                            <div class="flex items-center justify-between w-full">
+                                <span>📊 Raporlama & BI</span>
+                            </div>
+                        </ResponsiveNavLink>
+
+                        <ResponsiveNavLink v-if="hasPermission('duty_radar.view')"
+                            :href="route('duty-radar.index')"
+                            :active="route().current('duty-radar.*')">
+                            <div class="flex items-center justify-between w-full">
+                                <span>📍 Kim Nerede?</span>
+                            </div>
+                        </ResponsiveNavLink>
+
                         <ResponsiveNavLink :href="route('notifications.index')"
                             :active="route().current('notifications.*')">
                             <div class="flex items-center justify-between w-full">
@@ -676,6 +806,8 @@ onBeforeUnmount(() => {
                         <ResponsiveNavLink v-if="hasPermission('create_forms')"
                             :href="route('admin.form-categories.index')">Form
                             Kategorileri</ResponsiveNavLink>
+                        <ResponsiveNavLink v-if="hasPermission('duty_radar.manage_categories') || hasPermission('view_admin_panel')"
+                            :href="route('admin.duty-categories.index')">📍 Görev & Saha Türleri</ResponsiveNavLink>
                         <ResponsiveNavLink v-if="hasPermission('view_admin_panel')"
                             :href="route('admin.tree-types.index')">Şema
                             Tasarımcısı</ResponsiveNavLink>
@@ -711,6 +843,85 @@ onBeforeUnmount(() => {
             <main>
                 <slot />
             </main>
+
+            <!-- HIZLI İZİN & VEKALET TANIMLAMA MODALI -->
+            <div v-if="showQuickDelegationModal"
+                class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+                <div class="relative bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden transform transition-all">
+                    <!-- Modal Header -->
+                    <div class="px-6 py-4 bg-gradient-to-r from-amber-500 to-orange-600 text-white flex items-center justify-between">
+                        <div class="flex items-center gap-2.5">
+                            <span class="text-2xl">🏖️</span>
+                            <div>
+                                <h3 class="text-base font-extrabold text-white">İzin & Vekalet Tanımla</h3>
+                                <p class="text-xs text-amber-100">İzin süreniz boyunca görevlerinizi devredin</p>
+                            </div>
+                        </div>
+                        <button @click="showQuickDelegationModal = false" class="text-white/80 hover:text-white text-xl font-bold">&times;</button>
+                    </div>
+
+                    <!-- Modal Body -->
+                    <form @submit.prevent="submitQuickDelegation" class="p-6 space-y-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">
+                                Görevlerinizi Devralacak Vekil Personel <span class="text-rose-500">*</span>
+                            </label>
+                            <select v-model="quickDelegationForm.delegatee_id" required
+                                class="w-full text-xs rounded-lg border-slate-300 focus:border-amber-500 focus:ring-amber-500 py-2">
+                                <option value="" disabled>Personel seçiniz...</option>
+                                <option v-for="c in allColleagues" :key="c.id" :value="c.id">
+                                    {{ c.name }} ({{ c.title || c.email }})
+                                </option>
+                            </select>
+                            <p class="mt-1 text-[11px] text-slate-400">İzinli olduğunuz süre boyunca onaylarınız bu kişiye iletilir.</p>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-700 mb-1">
+                                    Başlangıç Tarihi <span class="text-rose-500">*</span>
+                                </label>
+                                <input v-model="quickDelegationForm.start_date" type="date" required
+                                    class="w-full text-xs rounded-lg border-slate-300 focus:border-amber-500 focus:ring-amber-500 py-1.5" />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-700 mb-1">
+                                    Bitiş Tarihi <span class="text-rose-500">*</span>
+                                </label>
+                                <input v-model="quickDelegationForm.end_date" type="date" required
+                                    class="w-full text-xs rounded-lg border-slate-300 focus:border-amber-500 focus:ring-amber-500 py-1.5" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">
+                                İzin Gerekçesi / Not
+                            </label>
+                            <input v-model="quickDelegationForm.reason" type="text"
+                                placeholder="Örn: Yıllık İzin / Şirket Dışı Görevlendirme"
+                                class="w-full text-xs rounded-lg border-slate-300 focus:border-amber-500 focus:ring-amber-500 py-1.5" />
+                        </div>
+
+                        <div class="p-3 bg-amber-50 rounded-xl border border-amber-200/80 text-[11px] text-amber-900 flex items-start gap-2">
+                            <span class="text-base shrink-0">💡</span>
+                            <span>İzin modunu dilediğiniz an sayfanın üstündeki turuncu bildirim çubuğundan tek tıkla sonlandırabilirsiniz.</span>
+                        </div>
+
+                        <!-- Modal Footer -->
+                        <div class="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                            <button type="button" @click="showQuickDelegationModal = false"
+                                class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition">
+                                İptal
+                            </button>
+                            <button type="submit" :disabled="isSubmittingDelegation"
+                                class="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white text-xs font-bold rounded-lg shadow-sm transition disabled:opacity-50 flex items-center gap-1.5">
+                                <span v-if="isSubmittingDelegation">Kaydediliyor...</span>
+                                <span v-else>🚀 İzin & Vekaleti Başlat</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
         </div>
     </div>
 </template>

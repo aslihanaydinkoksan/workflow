@@ -6,13 +6,16 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Department;
+use App\Models\MailDigestQueue;
 use App\Models\MailEvent;
 use App\Models\MailRule;
 use App\Models\MailSetting;
 use App\Models\MailTemplate;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Inertia\Inertia;
@@ -71,6 +74,16 @@ class MailSettingsController extends Controller
             'Sunday' => 'Pazar',
         ];
 
+        // 5. Sabah Özeti (Morning Digest) İstatistikleri ve Kuyruk Kayıtları
+        $digestStats = [
+            'pending_count' => MailDigestQueue::where('status', 'pending')->count(),
+            'sent_today_count' => MailDigestQueue::where('status', 'sent')->whereDate('sent_at', Carbon::today())->count(),
+            'recent_items' => MailDigestQueue::with('recipientUser')
+                ->orderByDesc('id')
+                ->limit(15)
+                ->get(),
+        ];
+
         return Inertia::render('Admin/MailSettings/Index', [
             'settings' => $globalSettings,
             'events' => $events,
@@ -78,6 +91,7 @@ class MailSettingsController extends Controller
             'roles' => $roles,
             'departments' => $departments,
             'availableDays' => $availableDays,
+            'digestStats' => $digestStats,
         ]);
     }
 
@@ -297,6 +311,20 @@ class MailSettingsController extends Controller
                 'error',
                 'E-posta gönderimi sırasında bir hata oluştu: ' . $e->getMessage()
             );
+        }
+    }
+
+    /**
+     * Sabah Yönetici Özeti (Morning Digest) bültenini manuel tetikler.
+     */
+    public function sendDigestNow(): RedirectResponse
+    {
+        try {
+            Artisan::call('mail:send-digest', ['--force' => true]);
+
+            return redirect()->back()->with('success', '☀️ Sabah Yönetici Özeti bülteni başarıyla çalıştırıldı ve bekleyen bildirimler iletildi.');
+        } catch (\Throwable $e) {
+            return redirect()->back()->with('error', 'Sabah özeti gönderilirken bir hata oluştu: ' . $e->getMessage());
         }
     }
 }

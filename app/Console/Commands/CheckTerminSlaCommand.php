@@ -84,7 +84,7 @@ class CheckTerminSlaCommand extends Command
         
         // Bugün zaten uyarı gönderildiyse tekrar gönderme
         $alreadySent = UserNotification::where('type', 'termin_warning')
-            ->where('task_id', $instance->id)
+            ->where('title', 'like', "%#{$instance->id}%")
             ->whereDate('created_at', Carbon::today())
             ->exists();
 
@@ -103,9 +103,22 @@ class CheckTerminSlaCommand extends Command
                     'type' => 'termin_warning',
                     'title' => $title,
                     'body' => $body,
-                    'task_id' => $instance->id,
+                    'task_id' => $task->id,
                     'read_at' => null,
                 ]);
+
+                // Kurumsal Mail Guard Güvenlik Kalkanı Üzerinden E-Posta Gönderimi
+                if ($task->assignedUser && $task->assignedUser->email) {
+                    try {
+                        Mail::raw($body, function ($msg) use ($task, $title) {
+                            $msg->to($task->assignedUser->email)
+                                ->subject($title)
+                                ->getHeaders()->addTextHeader('X-Mail-Event', 'termin_warning');
+                        });
+                    } catch (\Throwable $e) {
+                        Log::warning("SLA warning mail dispatch failed: " . $e->getMessage());
+                    }
+                }
             }
         }
     }
@@ -114,7 +127,7 @@ class CheckTerminSlaCommand extends Command
     {
         // Bugün zaten gecikme eskalasyonu gönderildiyse mükerrer gönderme
         $alreadySent = UserNotification::where('type', 'termin_overdue_escalation')
-            ->where('task_id', $instance->id)
+            ->where('title', 'like', "%#{$instance->id}%")
             ->whereDate('created_at', Carbon::today())
             ->exists();
 
@@ -128,19 +141,33 @@ class CheckTerminSlaCommand extends Command
               . "Müşteri: " . ($instance->data['musteri_adi'] ?? 'Belirtilmedi') . "\n"
               . "Lütfen gecikme gerekçesini sisteme giriniz veya acil aksiyon alınız.";
 
-        // 1. Satışçıya Bildir
+        $firstTaskId = $instance->tasks->first()?->id;
+
+        // 1. Satışçıya Bildir & Mail Gönder
         if ($instance->starter) {
             UserNotification::create([
                 'user_id' => $instance->starter->id,
                 'type' => 'termin_overdue_escalation',
                 'title' => $title,
                 'body' => $body,
-                'task_id' => $instance->id,
+                'task_id' => $firstTaskId,
                 'read_at' => null,
             ]);
+
+            if ($instance->starter->email) {
+                try {
+                    Mail::raw($body, function ($msg) use ($instance, $title) {
+                        $msg->to($instance->starter->email)
+                            ->subject($title)
+                            ->getHeaders()->addTextHeader('X-Mail-Event', 'termin_overdue_escalation');
+                    });
+                } catch (\Throwable $e) {
+                    Log::warning("SLA overdue starter mail dispatch failed: " . $e->getMessage());
+                }
+            }
         }
 
-        // 2. Bekleyen Görev Sahiplerine Bildir
+        // 2. Bekleyen Görev Sahiplerine Bildir & Mail Gönder
         foreach ($instance->tasks as $task) {
             if ($task->assigned_to && $task->assigned_to !== $instance->started_by) {
                 UserNotification::create([
@@ -148,9 +175,21 @@ class CheckTerminSlaCommand extends Command
                     'type' => 'termin_overdue_escalation',
                     'title' => $title,
                     'body' => $body,
-                    'task_id' => $instance->id,
+                    'task_id' => $task->id,
                     'read_at' => null,
                 ]);
+
+                if ($task->assignedUser && $task->assignedUser->email) {
+                    try {
+                        Mail::raw($body, function ($msg) use ($task, $title) {
+                            $msg->to($task->assignedUser->email)
+                                ->subject($title)
+                                ->getHeaders()->addTextHeader('X-Mail-Event', 'termin_overdue_escalation');
+                        });
+                    } catch (\Throwable $e) {
+                        Log::warning("SLA overdue assignee mail dispatch failed: " . $e->getMessage());
+                    }
+                }
             }
         }
     }

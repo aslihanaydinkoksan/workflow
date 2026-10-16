@@ -176,11 +176,14 @@ class DatabaseSeeder extends Seeder
         );
         $kullanici->assignRole('Kullanıcı');
 
-        // Hiyerarşi, Levha ve Dış Görev Seeder'larını çağır
+        // Hiyerarşi, Levha, Dış Görev, Görev Kategorileri ve Form Seeder'larını çağır
         $this->call([
             HierarchySeeder::class,
             LevhaCompleteWorkflowSeeder::class,
             DisGorevWorkflowSeeder::class,
+            DutyCategorySeeder::class,
+            MicrobiologyFormSeeder::class,
+            MailSystemSeeder::class,
         ]);
     }
 }

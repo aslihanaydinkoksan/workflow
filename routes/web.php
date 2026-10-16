@@ -88,6 +88,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/processes/{instance}/reschedule-termin', [\App\Http\Controllers\ProcessController::class, 'rescheduleTermin'])->name('processes.reschedule-termin');
     Route::get('/processes/{instance}/certificate', [\App\Http\Controllers\ProcessController::class, 'exportCertificate'])->name('processes.certificate');
     Route::get('/processes/{instance}/travel-order', [\App\Http\Controllers\ProcessController::class, 'exportTravelOrder'])->name('processes.travel-order');
+    Route::get('/processes/{instance}/maintenance-order', [\App\Http\Controllers\ProcessController::class, 'exportMaintenanceOrder'])->name('processes.maintenance-order');
+    Route::get('/processes/{instance}/dof-report', [\App\Http\Controllers\ProcessController::class, 'exportDofReport'])->name('processes.dof-report');
+    Route::get('/processes/{instance}/purchase-order', [\App\Http\Controllers\ProcessController::class, 'exportPurchaseOrder'])->name('processes.purchase-order');
     // Yönetici Süreç Müdahale Kokpiti (Fortune-500 Admin Intervention)
     Route::post('/processes/{instance}/admin/reassign', [\App\Http\Controllers\ProcessController::class, 'adminReassignTask'])->name('processes.admin.reassign');
     Route::post('/processes/{instance}/admin/jump-node', [\App\Http\Controllers\ProcessController::class, 'adminJumpNode'])->name('processes.admin.jump-node');
@@ -101,6 +104,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // Görevlerim (Tüm kullanıcılar kendi görevlerini görebilmeli)
     Route::get('/tasks', [\App\Http\Controllers\TaskController::class, 'index'])->name('tasks.index');
+    Route::post('/tasks/bulk-action', [\App\Http\Controllers\TaskController::class, 'bulkAction'])->name('tasks.bulk-action');
     Route::get('/tasks/{task}', [\App\Http\Controllers\TaskController::class, 'show'])->name('tasks.show');
     Route::post('/tasks/{task}', [\App\Http\Controllers\TaskController::class, 'update'])->name('tasks.update');
     Route::post('/tasks/{task}/undo', [\App\Http\Controllers\TaskController::class, 'undo'])->name('tasks.undo');
@@ -108,13 +112,31 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/tasks/{task}/export/pdf', [\App\Http\Controllers\TaskController::class, 'exportPdf'])->name('tasks.export.pdf');
     Route::get('/tasks/{task}/export/excel', [\App\Http\Controllers\TaskController::class, 'exportExcel'])->name('tasks.export.excel');
     Route::get('/tasks/{task}/export/certificate', [\App\Http\Controllers\TaskController::class, 'exportCertificate'])->name('tasks.export.certificate');
+
+    // Yönetici Görev & Test Süreç Yönetimi (Admin Soft Delete & Edit)
+    Route::put('/tasks/{task}/admin-update', [\App\Http\Controllers\TaskController::class, 'adminUpdate'])
+        ->name('tasks.admin-update')
+        ->middleware('can:tasks.admin_edit');
+    Route::delete('/tasks/{task}/admin-destroy', [\App\Http\Controllers\TaskController::class, 'adminDestroy'])
+        ->name('tasks.admin-destroy')
+        ->middleware('can:tasks.admin_delete');
+    Route::post('/tasks/admin-bulk-destroy', [\App\Http\Controllers\TaskController::class, 'adminBulkDestroy'])
+        ->name('tasks.admin-bulk-destroy')
+        ->middleware('can:tasks.admin_bulk_delete');
+
     // Vekalet Rotaları
     Route::post('/delegations', [\App\Http\Controllers\DelegationController::class, 'store'])->name('delegations.store');
     Route::delete('/delegations/{delegation}', [\App\Http\Controllers\DelegationController::class, 'destroy'])->name('delegations.destroy');
 
+    // Hiyerarşi / Makine API (Form Entegrasyonu)
+    Route::get('/api/hierarchy/nodes', [\App\Http\Controllers\Admin\HierarchyTestController::class, 'apiNodes'])->name('api.hierarchy.nodes');
+
     Route::get('/notifications', [\App\Http\Controllers\NotificationController::class, 'index'])->name('notifications.index');
     Route::post('/notifications/{notification}/read', [\App\Http\Controllers\NotificationController::class, 'markAsRead'])->name('notifications.read');
     Route::post('/notifications/read-all', [\App\Http\Controllers\NotificationController::class, 'markAllAsRead'])->name('notifications.read-all');
+
+    // Canlı Saha & Personel Radarı (Kim Nerede?)
+    Route::get('/duty-radar', [\App\Http\Controllers\DutyRadarController::class, 'index'])->name('duty-radar.index')->middleware('can:duty_radar.view');
 
     // Admin Rotaları
     Route::prefix('admin')->name('admin.')->middleware('can:view_admin_panel')->group(function () {
@@ -126,6 +148,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('directorates/{directorate}/check-usage', [\App\Http\Controllers\Admin\DirectorateController::class, 'checkUsage'])->name('directorates.check-usage')->middleware('can:manage_departments');
         Route::resource('directorates', \App\Http\Controllers\Admin\DirectorateController::class)->middleware('can:manage_departments');
         Route::get('roles/{role}/check-usage', [\App\Http\Controllers\Admin\RoleController::class, 'checkUsage'])->name('roles.check-usage')->middleware('can:manage_roles');
+        Route::post('permissions', [\App\Http\Controllers\Admin\RoleController::class, 'storePermission'])->name('permissions.store')->middleware('can:manage_roles');
         Route::resource('roles', \App\Http\Controllers\Admin\RoleController::class)->middleware('can:manage_roles');
         Route::get('users/sync-all-preview', [\App\Http\Controllers\Admin\UserController::class, 'syncAllPreview'])->name('users.sync-all-preview')->middleware('can:manage_users');
         Route::post('users/sync-all-apply', [\App\Http\Controllers\Admin\UserController::class, 'syncAllApply'])->name('users.sync-all-apply')->middleware('can:manage_users');
@@ -148,10 +171,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::put('/rules/{rule}', [\App\Http\Controllers\Admin\MailSettingsController::class, 'updateRule'])->name('rules.update');
             Route::put('/templates/{template}', [\App\Http\Controllers\Admin\MailSettingsController::class, 'updateTemplate'])->name('templates.update');
             Route::post('/test-mail', [\App\Http\Controllers\Admin\MailSettingsController::class, 'sendTestMail'])->name('test-mail');
+            Route::post('/send-digest', [\App\Http\Controllers\Admin\MailSettingsController::class, 'sendDigestNow'])->name('send-digest');
         });
 
         // Form Kategorileri
         Route::resource('form-categories', \App\Http\Controllers\Admin\FormCategoryController::class)->only(['index', 'store', 'update', 'destroy'])->middleware('can:create_forms');
+
+        // Dinamik Görev & Saha Kategorileri (Duty Categories CRUD)
+        Route::resource('duty-categories', \App\Http\Controllers\Admin\DutyCategoryController::class)->except(['create', 'show', 'edit'])->middleware('can:duty_radar.manage_categories');
+        Route::post('duty-categories/{dutyCategory}/toggle', [\App\Http\Controllers\Admin\DutyCategoryController::class, 'toggleActive'])->name('duty-categories.toggle')->middleware('can:duty_radar.manage_categories');
 
         // Hiyerarşi Yönetimi
         Route::get('hierarchy', [\App\Http\Controllers\Admin\HierarchyTestController::class, 'index'])->name('hierarchy.index')->middleware('can:view_admin_panel');
@@ -179,6 +207,25 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::get('/node/{workflow}/{node}', [\App\Http\Controllers\Admin\RuleController::class, 'getRulesByNode'])->name('node');
             Route::put('/{rule}', [\App\Http\Controllers\Admin\RuleController::class, 'update'])->name('update');
         });
+
+        // Kurumsal Denetim İzi & Güvenlik Kokpiti (Audit Diff & Log Center)
+        Route::get('audit-logs', [\App\Http\Controllers\Admin\AuditLogController::class, 'index'])->name('audit-logs.index');
+    });
+
+    // Enterprise BI & Raporlama Modülü (Self-Service Analytics)
+    Route::prefix('reports')->name('reports.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ReportController::class, 'index'])->name('index');
+        Route::post('/widgets', [\App\Http\Controllers\ReportController::class, 'storeWidget'])->name('widgets.store');
+        Route::delete('/widgets/{widget}', [\App\Http\Controllers\ReportController::class, 'destroyWidget'])->name('widgets.destroy');
+        Route::post('/widgets/{widget}/toggle-pin', [\App\Http\Controllers\ReportController::class, 'toggleWidgetPin'])->name('widgets.toggle-pin');
+        Route::post('/dashboards', [\App\Http\Controllers\ReportController::class, 'storeDashboard'])->name('dashboards.store');
+        Route::put('/dashboards/{dashboard}', [\App\Http\Controllers\ReportController::class, 'updateDashboard'])->name('dashboards.update');
+        Route::delete('/dashboards/{dashboard}', [\App\Http\Controllers\ReportController::class, 'destroyDashboard'])->name('dashboards.destroy');
+        Route::post('/preview', [\App\Http\Controllers\ReportController::class, 'queryPreview'])->name('preview');
+        Route::get('/dashboards/{dashboard}/pdf', [\App\Http\Controllers\ReportController::class, 'exportPdf'])->name('export.pdf');
+        Route::get('/dashboards/{dashboard}/excel', [\App\Http\Controllers\ReportController::class, 'exportExcel'])->name('export.excel');
+        Route::post('/schedules', [\App\Http\Controllers\ReportController::class, 'storeSchedule'])->name('schedules.store');
+        Route::post('/schedules/{schedule}/send-now', [\App\Http\Controllers\ReportController::class, 'sendScheduleNow'])->name('schedules.send-now');
     });
 });
 

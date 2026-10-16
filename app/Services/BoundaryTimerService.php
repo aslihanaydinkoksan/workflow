@@ -153,6 +153,24 @@ class BoundaryTimerService
                 'action_url'          => route('tasks.show', $task->id),
             ],
         ]);
+
+        // Kurumsal E-Posta Gönderimi (MailGuard Korumalı)
+        if ($manager->email) {
+            try {
+                \Illuminate\Support\Facades\Mail::raw(
+                    "'{$oldUserName}' personeline atanan görev {$hours} saat içinde tamamlanmadığı için BPMN 2.0 Boundary Timer kuralı gereğince size devredilmiştir.\n" .
+                    "Süreç: #{$instance->id} - {$nodeName}\n" .
+                    "İşlem Linki: " . route('tasks.show', $task->id),
+                    function ($msg) use ($manager, $instance, $nodeName) {
+                        $msg->to($manager->email)
+                            ->subject("⚠️ Süre Aşımı Eskalasyonu: #{$instance->id} - {$nodeName}")
+                            ->getHeaders()->addTextHeader('X-Mail-Event', 'boundary_timer_escalate');
+                    }
+                );
+            } catch (\Throwable $e) {
+                Log::warning("Boundary timer escalation mail failed: " . $e->getMessage());
+            }
+        }
     }
 
     /**
