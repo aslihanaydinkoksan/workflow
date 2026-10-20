@@ -59,7 +59,9 @@ class HandleInertiaRequests extends Middleware
                 'permissions' => $permissions,
             ],
             'centralSsoUrl' => rtrim(env('CENTRAL_SSO_URL', 'http://localhost:8001'), '/'),
-            'app_logo' => \App\Models\Setting::where('key', 'app_logo')->value('value') ?: asset('logo.jpg'),
+            'app_logo' => ($logo = \App\Models\Setting::where('key', 'app_logo')->value('value'))
+                ? (str_starts_with($logo, 'http') || str_starts_with($logo, '/') ? $logo : asset($logo))
+                : asset('images/koksan_logo.png'),
             'flash' => [
                 'success' => fn() => $request->session()->get('success'),
                 'error' => fn() => $request->session()->get('error'),

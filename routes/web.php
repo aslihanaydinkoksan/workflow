@@ -216,6 +216,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // Kurumsal Denetim İzi & Güvenlik Kokpiti (Audit Diff & Log Center)
         Route::get('audit-logs', [\App\Http\Controllers\Admin\AuditLogController::class, 'index'])->name('audit-logs.index');
+
+        // Kurumsal Güvenlik İzleme, SIEM & Tehdit Kokpiti (G1-G5 Standartları)
+        Route::prefix('security')->name('security.')->group(function () {
+            Route::get('/', [\App\Http\Controllers\Admin\SecurityMonitoringController::class, 'index'])->name('index');
+            Route::post('/run-tests', [\App\Http\Controllers\Admin\SecurityMonitoringController::class, 'runAcceptanceTests'])->name('run-tests');
+            Route::post('/clear-logs', [\App\Http\Controllers\Admin\SecurityMonitoringController::class, 'clearLogs'])->name('clear-logs');
+            Route::delete('/log-entry/{requestId}', [\App\Http\Controllers\Admin\SecurityMonitoringController::class, 'destroyLogEntry'])->name('destroy-log-entry');
+            Route::get('/export-json', [\App\Http\Controllers\Admin\SecurityMonitoringController::class, 'exportJson'])->name('export-json');
+        });
     });
 
     // Enterprise BI & Raporlama Modülü (Self-Service Analytics)

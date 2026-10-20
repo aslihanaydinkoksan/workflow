@@ -609,7 +609,9 @@ const formatShortDate = (val) => {
                                         <DropdownLink v-if="hasPermission('manage_roles')"
                                             :href="route('admin.roles.index')">Roller & Yetkiler</DropdownLink>
                                         <DropdownLink v-if="hasPermission('view_admin_panel')"
-                                            :href="route('admin.audit-logs.index')">🛡️ Denetim İzi & Güvenlik Kokpiti</DropdownLink>
+                                            :href="route('admin.audit-logs.index')">🛡️ Denetim İzi (Audit Diff)</DropdownLink>
+                                        <DropdownLink v-if="hasPermission('view_admin_panel')"
+                                            :href="route('admin.security.index')">🚨 Güvenlik & SIEM Kokpiti (G1-G5)</DropdownLink>
                                         <div class="border-t border-gray-100 my-1"></div>
                                         <div
                                             class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">

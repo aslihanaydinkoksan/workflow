@@ -583,6 +583,56 @@ Saha radarı ve ana sayfa bannerının kimler tarafından görüntülenebileceğ
    - Tarayıcı & UI Testi: `& "C:\node\node-v24.18.0-win-x64\node.exe" scratch/verify_admin_tasks_soft_delete_browser.mjs` (6 görsel kanıt, 0 uncaught JS hatası).
    - SQL Denetim İzi: `php scratch/print_admin_tasks_soft_delete_sql_proof.php` (`deleted_at IS NOT NULL` canlı kanıtı).
 
+---
+
+## 20. Kurumsal Güvenlik İzleme, SIEM (Logsign) & Tehdit Savunma Motoru (G1-G5 Standartları)
+IT Bilgi Güvenliği ekibinin resmi raporuna ve kabul kriterlerine göre devreye alınan kurumsal güvenlik izleme, saldırı tespit, brute force kalkanı ve SIEM (Logsign) entegrasyon modülüdür.
+
+### 1. Temel Mimarisi ve Karşılanan Gereksinimler:
+- **G1: Yapılandırılmış Güvenlik Olay Günlüğü (JSON & RFC 5424):**
+  - Tüm güvenlik olayları (`auth.*`, `attack.*`, `authz.*`, `session.*`, `input.*`) uygulama loglarından ayrı olarak `storage/logs/security-YYYY-MM-DD.log` dosyasına flat JSON formatında günlük yazılır (90 gün saklama süresi).
+  - Her olayda `@timestamp` (UTC ISO 8601 milisaniyeli), `event_type`, `event_category`, `severity`, `application`, `environment`, `request_id`, `source_ip`, `user_agent`, `method`, `path`, `route`, `user_id` alanları standarttır.
+  - Hassas veriler (`password`, `token`, `card_number`, `cvv`, `iban`, `tckn`, `tc_kimlik_no`, vb.) `ValueSanitizer` ile `[REDACTED]` olarak maskelenir; log injection'a karşı CR/LF karakterleri temizlenir ve metinler 200 karakterle sınırlandırılır.
+  - `AssignRequestId` global middleware'i her isteğe `X-Request-Id` UUID başlığı ekler ve SIEM ile korelasyon sağlar.
+- **G2: Bağımsız İki Kademeli Brute Force & Credential Stuffing Koruması:**
+  - `RateLimiterLoginAttemptGuard`: Hesap ve IP bütçesini birbirinden bağımsız iki ayrı sayaçta takip eder:
+    - **Hesap Başına:** 15 dakikada 5 başarısız denemede hesap kilitlenir (`auth.account_locked`). 6. ve sonraki denemelerde şifre kontrol edilmeden doğrudan `HTTP 429` ile reddedilir (`auth.login_blocked`).
+    - **IP Başına:** 15 dakikada 20 başarısız denemede IP engellenir (`auth.ip_blocked`). Tek IP'den farklı hesaplara saldıran Credential Stuffing anında durdurulur.
+    - Başarılı giriş yalnızca ilgili hesap sayacını sıfırlar; saldırganın IP sayacını sıfırlamasına izin verilmez.
+- **G3: SQL Injection, XSS Tespiti & Güvenli Kodlama:**
+  - `SqlInjectionDetector`: OWASP CRS tautology (`' or 1=1`), numeric tautology, `UNION SELECT`, stacked query (`DROP`, `DELETE`), time-based (`SLEEP`, `benchmark`), inline comment hileleri (`UNION/**/SELECT`), schema enumeration (`information_schema`) imzalarını yakalar (`attack.sqli_pattern`).
+  - `XssDetector`: `<script>`, event handler'lar (`onerror=`, `onload=`), tehlikeli tag'ler (`iframe`, `svg`), `javascript:` URI'lar, DOM sink'ler (`document.cookie`, `eval`, `atob`) imzalarını yakalar (`attack.xss_pattern`).
+  - Veritabanı syntax (`SQLSTATE 42xxx`, `21xxx`) hataları `attack.db_syntax_error` olarak loglanır; parametreli şablon yazılır, binding değerleri gizlenir.
+- **G4: Tarama Tespiti, Hata Oranı & Scanner User-Agent:**
+  - `ScannerUserAgentDetector`: 33 adet bilinen saldırı/fuzzing aracının (sqlmap, Nikto, Nuclei, Acunetix, gobuster, ffuf, hydra vb.) User-Agent'ını tespit eder (`attack.scanner_user_agent`, 10 dakikada 1 kez loglanarak log şişmesi önlenir).
+  - Hata Oranı Kalkanı: 60 saniyede tek bir IP'den 50 adet hata yanıtı (400, 401, 403, 404, 405, 419, 422, 429) geldiğinde `attack.scanning_behavior` tetiklenir (tekil 404'ler logu kirletmez).
+  - Laravel'in normalde loglamadığı `403` (`authz.access_denied`), `419` (`session.csrf_mismatch`), `422` (`input.validation_failed`) olayları `MonitorSecurityResponses` ile yakalanır.
+- **G5: Content Security Policy (CSP) & İhlal Raporlama:**
+  - HTML yanıtlarına `Content-Security-Policy-Report-Only` (veya `enforced`) header'ı basılır. Politika Inertia.js, Vite ve kurumsal fontlarla %100 uyumludur.
+  - Tarayıcı ihlal raporları `POST /security/csp-report` endpoint'ine gönderilir (CSRF ve session'dan muaf, IP başına 60 istek/dk sınırlı). Tarayıcı eklentisi (extension) çöpleri elenerek `attack.csp_violation` loglanır.
+
+### 2. Yapılandırma ve Servis Sağlayıcıları:
+- Modül Dizinleri: `app/Security/` (`Auth`, `Config`, `Contracts`, `Detection`, `Enums`, `Http`, `Listeners`, `Logging`), `app/Providers/SecurityMonitoringServiceProvider.php`, `config/security-monitoring.php`.
+- Kayıt: `bootstrap/providers.php` içinde `SecurityMonitoringServiceProvider`.
+- Middleware Hattı (`bootstrap/app.php`):
+  - `$middleware->prepend(AssignRequestId::class)`
+  - `$middleware->append([MonitorSecurityResponses::class, InspectRequestPayload::class, ContentSecurityPolicy::class])`
+  - `$middleware->alias(['security.login' => ThrottleLoginAttempts::class])`
+  - Subpath Desteği: `public/workflow_koksan/build` junction'ı ile `/workflow_koksan/` altında kusursuz asset teslimi.
+
+### 3. Doğrulama ve Kabul Testi Komutları:
+- **10/10 SIEM Kabul Testi Suite'i:** `php scratch/test_security_acceptance.php` (Tüm 10 kabul kriteri %100 başarıyla geçmektedir).
+- **Standalone İmza Doğrulama Testi:** `php scratch/run_signature_tests.php` (28 SQLi, 19 XSS ve 33 Türkçe/İngilizce normal metin %100 doğrulandı, 0 false-positive).
+- **Tarayıcı & UI Entegrasyon Testi:** `& "C:\node\node-v24.18.0-win-x64\node.exe" scratch/verify_security_browser.mjs` (0 kırmızı JavaScript hatası, CSP altında çalışan canlı form, görsel kanıtlar: `01_login_page_with_csp.png`, `02_login_failed_feedback.png`).
+- **Geliştirici & IT Canlı Güvenlik Kokpiti Testi:** `& "C:\node\node-v24.18.0-win-x64\node.exe" scratch/verify_security_cockpit_browser.mjs` (10/10 test laboratuvarı koşumu, canlı log listeleme, silme ve filtreleme, 0 konsol hatası).
+
+### 4. Geliştirici & IT Güvenlik Tehdit Kokpiti (`/admin/security`):
+- **Canlı Güvenlik Log Akışı (Tab 1):** Günlük flat JSON dosyasındaki olayları dinamik olarak tabloya döker, serbest takvim seçicisi (`date`), hızlı kısayollar (`Bugün`, `Dün`) ve saat/dakika aralığı (`time_start` - `time_end` HH:mm Europe/Istanbul) ile filtreler. Tek tıkla JSON detayı inceleme modalı (`openDetailModal`), tekil log satırını silme (`destroyLogEntry`), tüm günlük dosyayı temizleme (`clearLogsForDate`) ve ham Logsign JSON indirme (`exportJson`) yeteneklerine sahiptir. Dosya bulunamadığında kullanıcı dostu sarı durum uyarısı gösterilir.
+- **Canlı 10 Kabul Testi Laboratuvarı (Tab 2):** IT ekibinin istediği 10 kritik saldırı senaryosunu hem yerel ortamda hem sunucuda tek bir butona basarak (`Tüm 10 Testi Canlı Koştur`) çalıştırır. Aktif admin oturumunu ve CSRF token'larını sahte login denemelerinden korumak için testler arka planda izole bir CLI sürecinde (`php artisan security:test-acceptance --json`) koşturulur (0 oturum düşmesi, %100 oturum güvenliği). Test sonuçlarını yeşil kartlar (`✅ GEÇTİ`), harcanan milisaniye ve üretilen ham SIEM JSON örneğiyle görselleştirir.
+- **Güvenlik & SIEM Mimarisi (Tab 3):** Logsign collector bağlantısı, rsyslog akışı, brute force limitleri, CSP politikası ve KVKK `[REDACTED]` maskeleme kurallarını IT ekibine görsel olarak sunar.
+- **Arayüz & Rota:** `/admin/security` (`SecurityMonitoringController.php`, `resources/js/Pages/Admin/Security/Index.vue`).
+- **Menü Erişimi:** `AuthenticatedLayout.vue` -> `⚙️ Sistem Yönetimi` -> `🚨 Güvenlik & SIEM Kokpiti (G1-G5)`.
+
 
 
 

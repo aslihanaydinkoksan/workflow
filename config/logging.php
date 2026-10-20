@@ -127,6 +127,35 @@ return [
             'path' => storage_path('logs/laravel.log'),
         ],
 
+        'security' => [
+            'driver' => 'stack',
+            'channels' => array_values(array_filter(['security_file', env('SIEM_SYSLOG_HOST') ? 'security_syslog' : null])),
+            'ignore_exceptions' => true,
+        ],
+
+        'security_file' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/security.log'),
+            'level' => 'debug',
+            'days' => 90,
+            'formatter' => \App\Security\Logging\SecurityEventJsonFormatter::class,
+        ],
+
+        'security_syslog' => [
+            'driver' => 'monolog',
+            'level' => 'debug',
+            'handler' => SyslogUdpHandler::class,
+            'handler_with' => [
+                'host' => env('SIEM_SYSLOG_HOST'),
+                'port' => (int) env('SIEM_SYSLOG_PORT', 514),
+                'facility' => LOG_AUTH,
+                'ident' => env('SECURITY_APP_NAME', env('APP_NAME', 'koksan-portal')),
+                'rfc' => SyslogUdpHandler::RFC5424,
+            ],
+            'formatter' => \App\Security\Logging\SecurityEventJsonFormatter::class,
+            'formatter_with' => ['appendNewline' => false],
+        ],
+
     ],
 
 ];
