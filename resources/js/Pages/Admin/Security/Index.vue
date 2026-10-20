@@ -792,7 +792,16 @@ const getEventBadgeClass = (type) => {
                             </span>
                         </div>
 
-                        <p class="text-xs text-slate-600 leading-relaxed">
+                        <!-- Başarısızlık Durumunda Belirgin Uyarı Kutusu -->
+                        <div v-if="test.passed === false" class="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs">
+                            <div class="font-bold flex items-center gap-1.5 text-rose-950 mb-1">
+                                <span>⚠️</span> Başarısızlık Nedeni:
+                            </div>
+                            <div class="font-semibold text-rose-800 text-xs leading-relaxed">
+                                {{ test.details }}
+                            </div>
+                        </div>
+                        <p v-else class="text-xs text-slate-600 leading-relaxed">
                             {{ test.details || test.description }}
                         </p>
 
