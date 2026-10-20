@@ -445,13 +445,15 @@ Sonuç: 10 / 10 (% 100 Başarı)
 UI'ın ve tüm güvenlik altyapısının %100 birebir aynı olması için arkadaşlarınız kendi projelerinde şu promptu verebilirler:
 
 ```text
-Lütfen @IT_GUVENLIK_STANDARDI_VE_IMPLEMENTASYON_REHBERI.md belgesindeki adımları ve kurumsal güvenlik mimarisini projemize sırasıyla uygula.
+Lütfen projemizin ana dizininde bulunan @IT_GUVENLIK_STANDARDI_VE_IMPLEMENTASYON_REHBERI.md kılavuzundaki adımları ve kurumsal güvenlik mimarisini projemize sırasıyla uygula.
 
-Özellikle dikkat edilecekler:
-1. `app/Security/` klasörünü ve `resources/js/Pages/Admin/Security/Index.vue` dosyasını kaynak projedeki (Workflow) orijinal kodlarıyla birebir aynı şekilde oluştur (Böylece UI ve çalışma mantığı %100 aynı standartta olsun).
-2. `config/logging.php`, `config/security-monitoring.php` ve `bootstrap/app.php` ara katmanlarını rehberdeki gibi yapılandır.
-3. `routes/web.php` içine `/admin/security` ve `/security/csp-report` rotalarını ekle.
-4. `php artisan security:test-acceptance` komutunun 10/10 (%100) başarıyla geçtiğini doğrula.
+Paket dosyaları (app/Security/, resources/js/Pages/Admin/Security/Index.vue, Controller, Service vb.) projemize ayıklanmış durumdadır. Senden yapmanı istediğim adımlar:
+1. `app/Security/` klasörünün ve `resources/js/Pages/Admin/Security/Index.vue` bileşeninin eksiksiz yerleştiğini doğrula (UI ve çalışma mantığı kaynak Workflow projesiyle %100 birebir aynı standartta olsun).
+2. Projemizin `.env` dosyasına kılavuzdaki SECURITY_* parametrelerini ekle (`SECURITY_APP_NAME` değerini bizim projemizin adıyla güncelle).
+3. `config/logging.php` içine 'security' log kanallarını ve `config/security-monitoring.php` yapılandırmasını ekle.
+4. `bootstrap/app.php` (Laravel 11) ara katmanlarını (AssignRequestId, ThrottleLoginAttempts alias, MonitorSecurityResponses, InspectRequestPayload, ContentSecurityPolicy ve CSP CSRF istisnasını) rehberdeki sırayla kaydet.
+5. `routes/web.php` içine `/admin/security` yönetim rotalarını ve `/security/csp-report` uç noktasını (session/Inertia yükünden arındırılmış olarak) ekle.
+6. `php artisan optimize:clear` çalıştır ve ardından `php artisan security:test-acceptance` komutunu koşturarak 10 kabul testinin tamamının 10/10 (%100) başarıyla GEÇTİ olduğunu teyit et.
 ```
 
 ---
