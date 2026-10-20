@@ -12,10 +12,12 @@ use Inertia\Inertia;
  */
 Route::get('/sso/login', [\App\Http\Controllers\Auth\SsoController::class, 'login'])->name('sso.login');
 
+require __DIR__ . '/auth.php';
+
 $useCentralSso = filter_var(config('services.mys.use_central_sso', env('USE_CENTRAL_SSO', false)), FILTER_VALIDATE_BOOL);
 
 if ($useCentralSso) {
-    // Merkezi SSO Yönlendirmesi
+    // Merkezi SSO Yönlendirmesi: Normal tarayıcı GET /login çağrılarında MYS portalına yönlendirir
     Route::get('/login', function (\Illuminate\Http\Request $request) {
         $centralSsoUrl = rtrim(config('services.mys.url', env('CENTRAL_SSO_URL', 'http://localhost:8001')), '/');
         $appCode = config('services.mys.app_code', env('CENTRAL_SSO_APP_CODE', 'workflow-app'));
@@ -32,8 +34,6 @@ if ($useCentralSso) {
 
         return redirect($centralSsoUrl . '/global-logout');
     })->name('logout');
-} else {
-    require __DIR__ . '/auth.php';
 }
 
 Route::get('/', function () {

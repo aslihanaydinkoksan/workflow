@@ -27,7 +27,7 @@ return [
     ],
 
     'logging' => [
-        'application' => env('SECURITY_APP_NAME', env('APP_NAME', 'koksan-portal')),
+        'application' => env('SECURITY_APP_NAME', 'koksan-workflow'),
         // Max characters kept from any logged string value.
         'max_value_length' => 200,
         // true = usernames in logs become HMAC pseudonyms (still correlatable, not readable).

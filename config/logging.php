@@ -149,7 +149,7 @@ return [
                 'host' => env('SIEM_SYSLOG_HOST'),
                 'port' => (int) env('SIEM_SYSLOG_PORT', 514),
                 'facility' => LOG_AUTH,
-                'ident' => env('SECURITY_APP_NAME', env('APP_NAME', 'koksan-portal')),
+                'ident' => env('SECURITY_APP_NAME', 'koksan-workflow'),
                 'rfc' => SyslogUdpHandler::RFC5424,
             ],
             'formatter' => \App\Security\Logging\SecurityEventJsonFormatter::class,

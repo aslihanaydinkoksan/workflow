@@ -97,7 +97,7 @@ final class SecurityMonitoringController extends Controller
 
         // Güvenlik Konfigürasyon Bilgileri
         $configInfo = [
-            'app_name' => config('security-monitoring.logging.application', 'koksan-portal'),
+            'app_name' => config('security-monitoring.logging.application', 'koksan-workflow'),
             'log_channel' => config('security-monitoring.log_channel', 'security'),
             'max_account_attempts' => config('security-monitoring.login_throttle.max_account_attempts', 5),
             'max_ip_attempts' => config('security-monitoring.login_throttle.max_ip_attempts', 20),
