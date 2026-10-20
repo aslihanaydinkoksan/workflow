@@ -30,37 +30,56 @@ final class SecurityTestRunnerService
         $logFile = storage_path('logs/security-' . date('Y-m-d') . '.log');
         $startTimeTotal = microtime(true);
 
+        // Tarayıcıdan giriş yapmış admin kullanıcısının oturumu etkilenmeden
+        // /login POST testlerinin çalışabilmesi için RedirectIfAuthenticated'i geçici olarak devreden çıkarıyoruz
+        $guestMiddlewareClass = \Illuminate\Auth\Middleware\RedirectIfAuthenticated::class;
+        $originalGuestMiddleware = app()->bound($guestMiddlewareClass) ? app()->make($guestMiddlewareClass) : null;
+
+        app()->instance($guestMiddlewareClass, new class {
+            public function handle($request, $next) {
+                return $next($request);
+            }
+        });
+
         $results = [];
 
-        // 1. Başarısız Giriş
-        $results[] = $this->testFailedLogin($logFile);
+        try {
+            // 1. Başarısız Giriş
+            $results[] = $this->testFailedLogin($logFile);
 
-        // 2. Hesap Kilidi & 6. Denemede HTTP 429
-        $results[] = $this->testAccountLockout($logFile);
+            // 2. Hesap Kilidi & 6. Denemede HTTP 429
+            $results[] = $this->testAccountLockout($logFile);
 
-        // 3. Credential Stuffing & IP Engeli
-        $results[] = $this->testIpBlocked($logFile);
+            // 3. Credential Stuffing & IP Engeli
+            $results[] = $this->testIpBlocked($logFile);
 
-        // 4. SQL Injection & Scanner UA
-        $results[] = $this->testSqlInjection($logFile);
+            // 4. SQL Injection & Scanner UA
+            $results[] = $this->testSqlInjection($logFile);
 
-        // 5. XSS Taraması
-        $results[] = $this->testCrossSiteScripting($logFile);
+            // 5. XSS Taraması
+            $results[] = $this->testCrossSiteScripting($logFile);
 
-        // 6. Dizin Taraması & Yüksek Hata Oranı
-        $results[] = $this->testScanningBehavior($logFile);
+            // 6. Dizin Taraması & Yüksek Hata Oranı
+            $results[] = $this->testScanningBehavior($logFile);
 
-        // 7. CSRF Uyuşmazlığı
-        $results[] = $this->testCsrfMismatch($logFile);
+            // 7. CSRF Uyuşmazlığı
+            $results[] = $this->testCsrfMismatch($logFile);
 
-        // 8. Yetki Aşımı (403 Access Denied)
-        $results[] = $this->testAccessDenied($logFile);
+            // 8. Yetki Aşımı (403 Access Denied)
+            $results[] = $this->testAccessDenied($logFile);
 
-        // 9. CSP İhlal Raporu
-        $results[] = $this->testCspViolation($logFile);
+            // 9. CSP İhlal Raporu
+            $results[] = $this->testCspViolation($logFile);
 
-        // 10. Veritabanı Syntax Hatası
-        $results[] = $this->testDatabaseSyntaxError($logFile);
+            // 10. Veritabanı Syntax Hatası
+            $results[] = $this->testDatabaseSyntaxError($logFile);
+        } finally {
+            if ($originalGuestMiddleware !== null) {
+                app()->instance($guestMiddlewareClass, $originalGuestMiddleware);
+            } else {
+                app()->forgetInstance($guestMiddlewareClass);
+            }
+        }
 
         $passedCount = count(array_filter($results, fn($r) => $r['passed']));
         $durationMs = round((microtime(true) - $startTimeTotal) * 1000, 2);

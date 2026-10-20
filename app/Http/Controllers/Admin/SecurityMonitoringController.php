@@ -141,11 +141,33 @@ final class SecurityMonitoringController extends Controller
      */
     public function runAcceptanceTests(): JsonResponse
     {
-        $php = escapeshellarg(PHP_BINARY);
+        $phpCli = 'php';
+        if (PHP_SAPI !== 'cli') {
+            $candidates = [
+                '/usr/bin/php',
+                '/usr/bin/php8.2',
+                '/usr/bin/php8.3',
+                '/usr/local/bin/php',
+                'C:\\xampp\\php\\php.exe',
+            ];
+            foreach ($candidates as $cand) {
+                if (file_exists($cand)) {
+                    $phpCli = $cand;
+                    break;
+                }
+            }
+            if ($phpCli === 'php' && defined('PHP_BINARY') && !str_contains(PHP_BINARY, 'fpm') && !str_contains(PHP_BINARY, 'httpd')) {
+                $phpCli = PHP_BINARY;
+            }
+        } else {
+            $phpCli = PHP_BINARY;
+        }
+
+        $php = escapeshellarg($phpCli);
         $artisan = escapeshellarg(base_path('artisan'));
         $cmd = "{$php} {$artisan} security:test-acceptance --json 2>&1";
 
-        $output = shell_exec($cmd);
+        $output = function_exists('shell_exec') ? @shell_exec($cmd) : null;
         $report = null;
 
         if ($output) {
