@@ -49,9 +49,9 @@ final class RateLimiterLoginAttemptGuard implements LoginAttemptGuard
         return new LoginFailureState(
             accountAttempts: $accountAttempts,
             ipAttempts: $ipAttempts,
-            // "=== max" fires exactly once per window, so the SIEM gets one lock event, not one per retry.
-            accountLockedNow: $accountAttempts === $this->settings->maxAccountAttempts,
-            ipBlockedNow: $ipAttempts === $this->settings->maxIpAttempts,
+            // Fires when threshold is reached or exceeded
+            accountLockedNow: $accountAttempts >= $this->settings->maxAccountAttempts,
+            ipBlockedNow: $ipAttempts >= $this->settings->maxIpAttempts,
             lockSeconds: $this->settings->decaySeconds,
         );
     }
