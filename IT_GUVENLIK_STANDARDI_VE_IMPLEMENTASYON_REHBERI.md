@@ -358,7 +358,20 @@ Route::prefix('admin')->name('admin.')->middleware(['auth', 'can:view_admin_pane
 ```
 
 ### 3. Arayüz: `resources/js/Pages/Admin/Security/Index.vue`
-3 sekmeli zengin kurumsal arayüz:
+> 💎 **UI'ın Pikseli Pikseline (%100 Birebir) Aynı Olması İçin:**  
+> `Index.vue` bileşeni Workflow projesine özel **hiçbir veritabanı veya özel model bağımlılığı içermez**. Rotaları Ziggy (`route('admin.security.xxx')`) üzerinden dinamik çağırır ve standart `AuthenticatedLayout` kullanır.  
+> Bu nedenle diğer projelerde AI'ın arayüzü sıfırdan tahminle baştan yazması yerine, bu dosyanın **doğrudan kaynak projeden kopyalanması** %100 aynı UI görünümünü (3 sekme, filtreler, modal JSON görüntüleyici, canlı test lab kartları) garanti eder.
+>
+> **Hızlı Kopyalama Komutu:**
+> ```bash
+> # Linux / Sunucu Ortamında:
+> cp /var/www/kys_koksan/workflow_project/resources/js/Pages/Admin/Security/Index.vue resources/js/Pages/Admin/Security/Index.vue
+>
+> # Windows (PowerShell) Ortamında:
+> Copy-Item "c:\xampp\htdocs\workflow\resources\js\Pages\Admin\Security\Index.vue" -Destination "resources\js\Pages\Admin\Security\Index.vue" -Force
+> ```
+
+Arayüzün sunduğu 3 ana sekme:
 - **Sekme 1 (Canlı Log Akışı):** Canlı istatistik sayaçları (Toplam, Başarısız Giriş, Kilitli Hesap, Engellenen IP, SQLi, XSS, Scanner, CSP, DB Hatası), Tarih/Saat/Ciddiyet filtreleri, Arama çubuğu, Renkli Severity rozetleri, Modal ile formatlanmış JSON inceleme, Dışa Aktarma (Export NDJSON) butonu.
 - **Sekme 2 (IT Güvenlik Kabul Test Laboratuvarı):** Canlı **"Tüm 10 Testi Canlı Koştur"** butonu, interaktif ilerleme durumu, süre sayaçları (ms), Gereksinim & Beklenen Olay rozetleri, Başarılı/Başarısız teşhis detayları, üretilen örnek JSON log kartı.
 - **Sekme 3 (Sistem Yapılandırması):** Aktif `.env` parametreleri, Rate Limit eşikleri, CSP kuralları, WAF modu ve maskelenen hassas alanlar tablosu.
@@ -427,5 +440,21 @@ Sonuç: 10 / 10 (% 100 Başarı)
 
 ---
 
+### 💬 İş Arkadaşlarımızın Kendi Antigravity Agent'larına Vereceği Prompt
+
+UI'ın ve tüm güvenlik altyapısının %100 birebir aynı olması için arkadaşlarınız kendi projelerinde şu promptu verebilirler:
+
+```text
+Lütfen @IT_GUVENLIK_STANDARDI_VE_IMPLEMENTASYON_REHBERI.md belgesindeki adımları ve kurumsal güvenlik mimarisini projemize sırasıyla uygula.
+
+Özellikle dikkat edilecekler:
+1. `app/Security/` klasörünü ve `resources/js/Pages/Admin/Security/Index.vue` dosyasını kaynak projedeki (Workflow) orijinal kodlarıyla birebir aynı şekilde oluştur (Böylece UI ve çalışma mantığı %100 aynı standartta olsun).
+2. `config/logging.php`, `config/security-monitoring.php` ve `bootstrap/app.php` ara katmanlarını rehberdeki gibi yapılandır.
+3. `routes/web.php` içine `/admin/security` ve `/security/csp-report` rotalarını ekle.
+4. `php artisan security:test-acceptance` komutunun 10/10 (%100) başarıyla geçtiğini doğrula.
+```
+
+---
+
 ### 🎉 Sonuç
-Bu standart uygulandığında; Köksan bünyesindeki tüm web projeleri kurumsal siber güvenlik denetimlerine %100 hazır, SIEM entegrasyonu tamamlanmış, aynı yönetim paneline ve aynı yüksek dayanıklılık standartlarına sahip olacaktır.
+Bu standart uygulandığında; Köksan bünyesindeki tüm web projeleri kurumsal siber güvenlik denetimlerine %100 hazır, SIEM entegrasyonu tamamlanmış, aynı yönetim paneline (`/admin/security`) ve aynı yüksek dayanıklılık standartlarına sahip olacaktır.
