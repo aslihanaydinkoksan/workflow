@@ -68,12 +68,13 @@ final class SecurityMonitoringServiceProvider extends ServiceProvider
     {
         $events->subscribe(AuthenticationEventSubscriber::class);
 
-        if ($csp->enabled && !$this->app->routesAreCached()) {
-            $limit = max(1, (int) $config->get(self::CONFIG . '.csp.report_rate_limit', 60));
+        if ($csp->enabled && !$router->has('security.csp-report') && !$this->app->routesAreCached()) {
+            $limit = max(1, (int) $config->get(self::CONFIG . '.csp.report_rate_limit', 120));
 
             // Registered outside the "web" group on purpose: browsers post reports without
             // session cookies or CSRF tokens.
             $router->post($csp->reportPath, CspReportController::class)
+                ->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class])
                 ->middleware("throttle:{$limit},1")
                 ->name('security.csp-report');
         }

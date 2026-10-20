@@ -64,6 +64,7 @@ return [
         // Request::is() patterns skipped entirely, e.g. 'admin/cms/*'.
         'excluded_paths' => [
             'dev/*',
+            'security/csp-report*',
         ],
         // Only the first N bytes of each value are inspected.
         'max_inspect_length' => 8192,

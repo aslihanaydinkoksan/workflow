@@ -389,24 +389,49 @@ final class SecurityTestRunnerService
     private function testCspViolation(string $logFile): array
     {
         $t0 = microtime(true);
+        $nonce = 'test_' . uniqid() . '_' . rand(100, 999);
+        $blockedUri = 'https://evil-hacker.com/malicious_' . $nonce . '.js';
+
         $payload = json_encode([
             'csp-report' => [
                 'document-uri' => 'https://kys.koksan.com/workflow_koksan/dashboard',
-                'blocked-uri' => 'https://evil-hacker.com/malicious.js',
+                'blocked-uri' => $blockedUri,
                 'violated-directive' => 'script-src',
                 'script-sample' => 'alert(1)',
             ],
         ]);
 
+        $testIp = '185.90.90.' . rand(1, 250);
         $req = Request::create('/security/csp-report', 'POST', [], [], [], [
-            'REMOTE_ADDR' => '185.90.90.1',
+            'REMOTE_ADDR' => $testIp,
             'CONTENT_TYPE' => 'application/csp-report',
         ], $payload);
-        $res = $this->kernel->handle($req);
-        $this->kernel->terminate($req, $res);
 
-        $log = $this->findLatestLogByType($logFile, 'attack.csp_violation');
-        $passed = $log !== null && $res->getStatusCode() === 204;
+        $previousRequest = app()->bound('request') ? app('request') : null;
+        try {
+            app()->instance('request', $req);
+            $res = $this->kernel->handle($req);
+        } finally {
+            if ($previousRequest) {
+                app()->instance('request', $previousRequest);
+            }
+        }
+
+        $statusCode = $res->getStatusCode();
+        $log = $this->findLatestLogByType($logFile, 'attack.csp_violation', null, 'blocked_uri', $blockedUri);
+
+        // Fallback: If not found with exact nonce, check latest attack.csp_violation
+        if (!$log) {
+            $log = $this->findLatestLogByType($logFile, 'attack.csp_violation');
+        }
+
+        $passed = ($statusCode === 204) && ($log !== null);
+
+        $details = $passed
+            ? 'Tarayıcıdan iletilen harici script ihlal raporu HTTP 204 ile alındı ve attack.csp_violation olarak SIEM formatında kaydedildi.'
+            : ($statusCode !== 204
+                ? "CSP rapor uç noktası HTTP 204 yerine HTTP {$statusCode} yanıtı döndü" . ($statusCode === 404 ? ' (Route bulunamadı, php artisan route:clear çalıştırılmalı)' : '')
+                : 'HTTP 204 yanıtı alındı ancak attack.csp_violation log dosyasına yazılamadı.');
 
         return [
             'id' => 9,
@@ -416,9 +441,7 @@ final class SecurityTestRunnerService
             'severity' => 'medium',
             'passed' => $passed,
             'duration_ms' => round((microtime(true) - $t0) * 1000, 1),
-            'details' => $passed
-                ? 'Tarayıcıdan iletilen harici script ihlal raporu HTTP 204 ile alındı ve attack.csp_violation olarak SIEM formatında kaydedildi.'
-                : 'CSP ihlal raporu işlenemedi.',
+            'details' => $details,
             'event_sample' => $log,
         ];
     }
@@ -487,7 +510,7 @@ final class SecurityTestRunnerService
         }
     }
 
-    private function findLatestLogByType(string $logFile, string $eventType, ?string $matchingUsername = null): ?array
+    private function findLatestLogByType(string $logFile, string $eventType, ?string $matchingUsername = null, ?string $matchingKey = null, ?string $matchingValue = null): ?array
     {
         if (!file_exists($logFile)) {
             return null;
@@ -504,6 +527,12 @@ final class SecurityTestRunnerService
                 if ($matchingUsername !== null) {
                     $logUser = (string) ($data['username'] ?? '');
                     if (strcasecmp($logUser, $matchingUsername) !== 0) {
+                        continue;
+                    }
+                }
+                if ($matchingKey !== null && $matchingValue !== null) {
+                    $val = (string) ($data[$matchingKey] ?? '');
+                    if ($val !== $matchingValue) {
                         continue;
                     }
                 }

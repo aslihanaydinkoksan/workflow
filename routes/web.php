@@ -14,6 +14,15 @@ Route::get('/sso/login', [\App\Http\Controllers\Auth\SsoController::class, 'logi
 
 require __DIR__ . '/auth.php';
 
+/**
+ * Browser Content Security Policy (CSP) İhlal Raporlama Uç Noktası (G5 Standartı)
+ * Tarayıcıların engellediği harici betikleri CSRF token'ı olmaksızın bildirdiği uç noktadır.
+ */
+Route::post('security/csp-report', \App\Security\Http\Controllers\CspReportController::class)
+    ->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class])
+    ->middleware('throttle:120,1')
+    ->name('security.csp-report');
+
 $useCentralSso = filter_var(config('services.mys.use_central_sso', env('USE_CENTRAL_SSO', false)), FILTER_VALIDATE_BOOL);
 
 if ($useCentralSso) {
