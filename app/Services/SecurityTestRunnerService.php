@@ -182,7 +182,14 @@ final class SecurityTestRunnerService
                 $reasons[] = "auth.login_blocked loglanamadı (6. denemede hesap engeli oluşmadı)";
             }
             if (!$isBlockedResponse) {
-                $reasons[] = "6. denemede HTTP 429/302 beklenirken HTTP {$res6->getStatusCode()} yanıtı alındı";
+                $errSnippet = '';
+                if ($res6->getStatusCode() === 500) {
+                    $raw = $res6->getContent();
+                    $decoded = json_decode($raw, true);
+                    $msg = $decoded['message'] ?? substr(strip_tags($raw), 0, 160);
+                    $errSnippet = ' [Hata: ' . trim($msg) . ']';
+                }
+                $reasons[] = "6. denemede HTTP 429/302 beklenirken HTTP {$res6->getStatusCode()} yanıtı alındı" . $errSnippet;
             }
             $details = "Başarısızlık Nedeni: " . implode('; ', $reasons);
         }
@@ -446,6 +453,8 @@ final class SecurityTestRunnerService
     private function makePostRequest(string $uri, array $data, string $ip = '127.0.0.1'): \Symfony\Component\HttpFoundation\Response
     {
         $currentUser = auth()->user();
+        $previousRequest = app()->bound('request') ? app('request') : null;
+
         if ($currentUser) {
             app('auth')->guard()->forgetUser();
         }
@@ -463,12 +472,15 @@ final class SecurityTestRunnerService
                 'HTTP_X_REQUESTED_WITH' => 'XMLHttpRequest',
             ]);
             $req->setLaravelSession($session);
+            app()->instance('request', $req);
 
             $res = $this->kernel->handle($req);
-            $this->kernel->terminate($req, $res);
 
             return $res;
         } finally {
+            if ($previousRequest) {
+                app()->instance('request', $previousRequest);
+            }
             if ($currentUser) {
                 auth()->setUser($currentUser);
             }

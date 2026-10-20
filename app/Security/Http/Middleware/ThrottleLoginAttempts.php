@@ -51,12 +51,26 @@ final class ThrottleLoginAttempts
 
             $request->attributes->set(self::HANDLED_ATTRIBUTE, true);
 
-            throw ValidationException::withMessages([
-                $this->settings->usernameField => $this->translator->get('auth.throttle', [
-                    'seconds' => $wait,
-                    'minutes' => (int) ceil($wait / 60),
-                ]),
+            $msg = $this->translator->get('auth.throttle', [
+                'seconds' => $wait,
+                'minutes' => (int) ceil($wait / 60),
+            ]);
+
+            $jsonResponse = response()->json([
+                'message' => $msg,
+                'errors' => [
+                    $this->settings->usernameField => [$msg],
+                ],
+                'retry_after' => $wait,
+            ], Response::HTTP_TOO_MANY_REQUESTS);
+
+            $exception = ValidationException::withMessages([
+                $this->settings->usernameField => $msg,
             ])->status(Response::HTTP_TOO_MANY_REQUESTS);
+
+            $exception->response = $jsonResponse;
+
+            throw $exception;
         }
 
         return $next($request);
