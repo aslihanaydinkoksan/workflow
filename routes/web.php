@@ -19,7 +19,14 @@ require __DIR__ . '/auth.php';
  * Tarayıcıların engellediği harici betikleri CSRF token'ı olmaksızın bildirdiği uç noktadır.
  */
 Route::post('security/csp-report', \App\Security\Http\Controllers\CspReportController::class)
-    ->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class])
+    ->withoutMiddleware([
+        \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class,
+        \Illuminate\Session\Middleware\StartSession::class,
+        \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+        \App\Http\Middleware\HandleInertiaRequests::class,
+        \Illuminate\Cookie\Middleware\EncryptCookies::class,
+        \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+    ])
     ->middleware('throttle:120,1')
     ->name('security.csp-report');
 

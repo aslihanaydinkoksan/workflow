@@ -152,11 +152,15 @@ final class SecurityTestRunnerService
         $lockoutIp = '185.30.' . rand(10, 240) . '.' . rand(2, 240);
 
         // 5 başarısız deneme gönder
+        $attemptErrors = [];
         for ($i = 1; $i <= 5; $i++) {
-            $this->makePostRequest('/login', [
+            $resAttempt = $this->makePostRequest('/login', [
                 'email' => $targetEmail,
                 'password' => 'wrong_pass_' . $i,
             ], $lockoutIp);
+            if ($resAttempt->getStatusCode() === 500) {
+                $attemptErrors[] = "Deneme #{$i} HTTP 500" . $this->extractExceptionDetails($resAttempt);
+            }
         }
 
         $logLocked = $this->findLatestLogByType($logFile, 'auth.account_locked', $targetEmail);
@@ -182,14 +186,11 @@ final class SecurityTestRunnerService
                 $reasons[] = "auth.login_blocked loglanamadı (6. denemede hesap engeli oluşmadı)";
             }
             if (!$isBlockedResponse) {
-                $errSnippet = '';
-                if ($res6->getStatusCode() === 500) {
-                    $raw = $res6->getContent();
-                    $decoded = json_decode($raw, true);
-                    $msg = $decoded['message'] ?? substr(strip_tags($raw), 0, 160);
-                    $errSnippet = ' [Hata: ' . trim($msg) . ']';
-                }
+                $errSnippet = $this->extractExceptionDetails($res6);
                 $reasons[] = "6. denemede HTTP 429/302 beklenirken HTTP {$res6->getStatusCode()} yanıtı alındı" . $errSnippet;
+            }
+            if (!empty($attemptErrors)) {
+                $reasons[] = "Önceki deneme hataları: " . implode('; ', array_unique($attemptErrors));
             }
             $details = "Başarısızlık Nedeni: " . implode('; ', $reasons);
         }
@@ -430,7 +431,7 @@ final class SecurityTestRunnerService
         $details = $passed
             ? 'Tarayıcıdan iletilen harici script ihlal raporu HTTP 204 ile alındı ve attack.csp_violation olarak SIEM formatında kaydedildi.'
             : ($statusCode !== 204
-                ? "CSP rapor uç noktası HTTP 204 yerine HTTP {$statusCode} yanıtı döndü" . ($statusCode === 404 ? ' (Route bulunamadı, php artisan route:clear çalıştırılmalı)' : '')
+                ? "CSP rapor uç noktası HTTP 204 yerine HTTP {$statusCode} yanıtı döndü" . $this->extractExceptionDetails($res) . ($statusCode === 404 ? ' (Route bulunamadı, php artisan route:clear çalıştırılmalı)' : '')
                 : 'HTTP 204 yanıtı alındı ancak attack.csp_violation log dosyasına yazılamadı.');
 
         return [
@@ -475,7 +476,7 @@ final class SecurityTestRunnerService
 
     private function makePostRequest(string $uri, array $data, string $ip = '127.0.0.1'): \Symfony\Component\HttpFoundation\Response
     {
-        $currentUser = auth()->user();
+        $currentUser = auth()->check() ? auth()->user() : null;
         $previousRequest = app()->bound('request') ? app('request') : null;
 
         if ($currentUser) {
@@ -541,5 +542,22 @@ final class SecurityTestRunnerService
         }
 
         return null;
+    }
+
+    private function extractExceptionDetails(\Symfony\Component\HttpFoundation\Response $res): string
+    {
+        if (property_exists($res, 'exception') && $res->exception instanceof \Throwable) {
+            $e = $res->exception;
+            return " [" . class_basename($e) . ": " . $e->getMessage() . " in " . basename($e->getFile()) . ":" . $e->getLine() . "]";
+        }
+
+        $raw = $res->getContent();
+        $decoded = json_decode($raw, true);
+        if (isset($decoded['message'])) {
+            return " [Hata: {$decoded['message']}]";
+        }
+
+        $stripped = trim(strip_tags($raw));
+        return $stripped !== '' ? " [Hata: " . substr($stripped, 0, 160) . "]" : '';
     }
 }

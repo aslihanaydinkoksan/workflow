@@ -56,21 +56,13 @@ final class ThrottleLoginAttempts
                 'minutes' => (int) ceil($wait / 60),
             ]);
 
-            $jsonResponse = response()->json([
+            return response()->json([
                 'message' => $msg,
                 'errors' => [
                     $this->settings->usernameField => [$msg],
                 ],
                 'retry_after' => $wait,
             ], Response::HTTP_TOO_MANY_REQUESTS);
-
-            $exception = ValidationException::withMessages([
-                $this->settings->usernameField => $msg,
-            ])->status(Response::HTTP_TOO_MANY_REQUESTS);
-
-            $exception->response = $jsonResponse;
-
-            throw $exception;
         }
 
         return $next($request);
